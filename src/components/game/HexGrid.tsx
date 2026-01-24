@@ -55,8 +55,10 @@ export const HexGrid = ({
   const HEX_HEIGHT = 2 * HEX_SIZE;
 
   const hexToPixel = (q: number, r: number) => {
-    const x = HEX_SIZE * Math.sqrt(3) * (q + r / 2);
-    const y = HEX_SIZE * (3 / 2) * r;
+    // Смещаем чётные ряды вправо на пол-гекса для выравнивания
+    const offset = r % 2 === 0 ? 0 : HEX_WIDTH / 2;
+    const x = q * HEX_WIDTH + offset;
+    const y = r * HEX_HEIGHT * 0.75;
     return { x: x + HEX_WIDTH, y: y + HEX_HEIGHT };
   };
 
