@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { BattleUnit } from '@/store/gameStore';
+import { BattleUnit, hexDistance } from '@/store/gameStore';
 import { cn } from '@/lib/utils';
 
 interface HexGridProps {
@@ -8,11 +8,14 @@ interface HexGridProps {
   obstacles: Set<string>;
   units: BattleUnit[];
   selectedUnit: BattleUnit | null;
+  currentUnit: BattleUnit | null;
   onHexClick: (q: number, r: number) => void;
+  onHexHover: (q: number, r: number, unit: BattleUnit | null) => void;
   movementRange?: Set<string>;
+  hoveredEnemy: BattleUnit | null;
 }
 
-const HEX_SIZE = 32;
+const HEX_SIZE = 28;
 const HEX_WIDTH = Math.sqrt(3) * HEX_SIZE;
 const HEX_HEIGHT = 2 * HEX_SIZE;
 
@@ -39,8 +42,11 @@ export const HexGrid = ({
   obstacles,
   units,
   selectedUnit,
+  currentUnit,
   onHexClick,
+  onHexHover,
   movementRange = new Set(),
+  hoveredEnemy,
 }: HexGridProps) => {
   const hexes = useMemo(() => {
     const result = [];
@@ -50,8 +56,22 @@ export const HexGrid = ({
         const { x, y } = hexToPixel(q, r);
         const isObstacle = obstacles.has(key);
         const isMovement = movementRange.has(key);
-        const unit = units.find(u => u.position?.q === q && u.position?.r === r);
+        const unit = units.find(u => u.position?.q === q && u.position?.r === r && !u.isDead);
         const isSelected = selectedUnit?.position?.q === q && selectedUnit?.position?.r === r;
+        const isCurrent = currentUnit?.position?.q === q && currentUnit?.position?.r === r;
+
+        // Check if this enemy is in attack range
+        let isInAttackRange = false;
+        let attackDistancePenalty = false;
+        if (unit && currentUnit && unit.owner !== currentUnit.owner && currentUnit.position && !currentUnit.hasActed) {
+          const distance = hexDistance(currentUnit.position, { q, r });
+          if (currentUnit.attackRange === 'melee') {
+            isInAttackRange = distance <= currentUnit.range;
+          } else {
+            isInAttackRange = true; // Ranged can attack anywhere
+            attackDistancePenalty = distance > 5;
+          }
+        }
 
         result.push({
           q,
@@ -63,11 +83,14 @@ export const HexGrid = ({
           isMovement,
           unit,
           isSelected,
+          isCurrent,
+          isInAttackRange,
+          attackDistancePenalty,
         });
       }
     }
     return result;
-  }, [width, height, obstacles, units, selectedUnit, movementRange]);
+  }, [width, height, obstacles, units, selectedUnit, currentUnit, movementRange]);
 
   const svgWidth = (width + 0.5) * HEX_WIDTH + HEX_WIDTH;
   const svgHeight = height * HEX_HEIGHT * 0.75 + HEX_HEIGHT;
@@ -75,19 +98,27 @@ export const HexGrid = ({
   return (
     <svg
       viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-      className="w-full h-full max-h-[70vh]"
-      style={{ maxWidth: '100%' }}
+      className="w-full h-full"
+      style={{ maxWidth: svgWidth, maxHeight: svgHeight }}
     >
       {/* Grid hexes */}
-      {hexes.map(({ q, r, x, y, key, isObstacle, isMovement, unit, isSelected }) => (
-        <g key={key} onClick={() => onHexClick(q, r)}>
+      {hexes.map(({ q, r, x, y, key, isObstacle, isMovement, unit, isSelected, isCurrent, isInAttackRange, attackDistancePenalty }) => (
+        <g 
+          key={key} 
+          onClick={() => onHexClick(q, r)}
+          onMouseEnter={() => onHexHover(q, r, unit || null)}
+          onMouseLeave={() => onHexHover(q, r, null)}
+          style={{ cursor: (isMovement || isInAttackRange) ? 'pointer' : 'default' }}
+        >
           <polygon
             points={hexPoints(x, y)}
             className={cn(
               'hex-tile',
               isObstacle && 'hex-obstacle',
               isSelected && 'hex-selected',
-              isMovement && !unit && 'hex-movement'
+              isCurrent && !isSelected && 'hex-current',
+              isMovement && !unit && 'hex-movement',
+              isInAttackRange && hoveredEnemy?.id === unit?.id && 'hex-attack'
             )}
           />
           
@@ -98,38 +129,78 @@ export const HexGrid = ({
               <circle
                 cx={x}
                 cy={y}
-                r={HEX_SIZE * 0.7}
+                r={HEX_SIZE * 0.75}
                 className={cn(
-                  'fill-card stroke-2',
-                  unit.owner === 'player' ? 'stroke-health' : 'stroke-destructive'
+                  'fill-card stroke-2 transition-all',
+                  unit.owner === 'player' ? 'stroke-health' : 'stroke-destructive',
+                  isCurrent && 'stroke-primary stroke-[3px]',
+                  isInAttackRange && hoveredEnemy?.id === unit.id && 'stroke-accent stroke-[3px]'
                 )}
               />
               
               {/* Unit avatar */}
               <text
                 x={x}
-                y={y + 5}
+                y={y + 4}
                 textAnchor="middle"
-                className="text-lg select-none pointer-events-none"
+                className="text-base select-none pointer-events-none"
               >
                 {unit.avatar}
               </text>
               
+              {/* Attack indicator */}
+              {isInAttackRange && hoveredEnemy?.id === unit.id && (
+                <g>
+                  <circle
+                    cx={x + HEX_SIZE * 0.5}
+                    cy={y - HEX_SIZE * 0.5}
+                    r={10}
+                    className="fill-destructive"
+                  />
+                  <text
+                    x={x + HEX_SIZE * 0.5}
+                    y={y - HEX_SIZE * 0.5 + 4}
+                    textAnchor="middle"
+                    className="text-xs fill-white select-none pointer-events-none"
+                  >
+                    {attackDistancePenalty ? '½' : '⚔'}
+                  </text>
+                </g>
+              )}
+              
               {/* Health bar */}
-              <g transform={`translate(${x - 15}, ${y + HEX_SIZE * 0.5})`}>
+              <g transform={`translate(${x - 12}, ${y + HEX_SIZE * 0.55})`}>
                 <rect
-                  width={30}
+                  width={24}
                   height={4}
                   rx={2}
                   className="fill-muted"
                 />
                 <rect
-                  width={30 * (unit.currentHealth / unit.maxHealth)}
+                  width={24 * (unit.currentHealth / unit.maxHealth)}
                   height={4}
                   rx={2}
-                  className="fill-health"
+                  className={cn(
+                    unit.currentHealth / unit.maxHealth > 0.5 
+                      ? 'fill-health' 
+                      : unit.currentHealth / unit.maxHealth > 0.25 
+                        ? 'fill-amber-500' 
+                        : 'fill-destructive'
+                  )}
                 />
               </g>
+              
+              {/* Energy bar */}
+              {unit.currentEnergy > 0 && (
+                <g transform={`translate(${x - 12}, ${y + HEX_SIZE * 0.55 + 5})`}>
+                  <rect
+                    width={24 * (unit.currentEnergy / unit.maxEnergy)}
+                    height={2}
+                    rx={1}
+                    className="fill-energy"
+                  />
+                </g>
+              )}
             </>
           )}
           
@@ -137,7 +208,7 @@ export const HexGrid = ({
           {isObstacle && (
             <text
               x={x}
-              y={y + 5}
+              y={y + 4}
               textAnchor="middle"
               className="text-sm select-none pointer-events-none fill-muted-foreground/50"
             >
@@ -214,7 +285,7 @@ export const getMovementRange = (
     
     if (current.distance > 0 && current.distance <= unit.speed) {
       const hasUnit = units.some(
-        u => u.position?.q === current.q && u.position?.r === current.r
+        u => u.position?.q === current.q && u.position?.r === current.r && !u.isDead
       );
       if (!hasUnit && !obstacles.has(key)) {
         range.add(key);
