@@ -22,6 +22,9 @@ export const HeroCard = ({ hero, onClick, selected, disabled, compact }: HeroCar
     support: 'Поддержка',
   }[hero.role];
 
+  const rangeIcon = hero.attackRange === 'melee' ? '⚔️' : '🎯';
+  const rangeLabel = hero.attackRange === 'melee' ? 'Ближний' : `Дальний (${hero.range})`;
+
   if (compact) {
     return (
       <div
@@ -35,7 +38,10 @@ export const HeroCard = ({ hero, onClick, selected, disabled, compact }: HeroCar
         <span className="text-2xl">{hero.avatar}</span>
         <div className="flex-1 min-w-0">
           <p className="font-display text-sm truncate">{hero.name}</p>
-          <span className={cn('role-badge text-[10px]', roleClass)}>{roleLabel}</span>
+          <div className="flex gap-1">
+            <span className={cn('role-badge text-[10px]', roleClass)}>{roleLabel}</span>
+            <span className="text-[10px] text-muted-foreground">{rangeIcon}</span>
+          </div>
         </div>
       </div>
     );
@@ -58,11 +64,16 @@ export const HeroCard = ({ hero, onClick, selected, disabled, compact }: HeroCar
         <div className="absolute top-2 right-2">
           <span className={cn('role-badge', roleClass)}>{roleLabel}</span>
         </div>
+        <div className="absolute top-2 left-2">
+          <span className="text-xs bg-muted/80 px-1.5 py-0.5 rounded" title={rangeLabel}>
+            {rangeIcon} {hero.range}
+          </span>
+        </div>
       </div>
 
       {/* Info section */}
       <div className="p-3">
-        <h3 className="font-display font-semibold text-foreground">{hero.name}</h3>
+        <h3 className="font-display font-semibold text-foreground text-sm">{hero.name}</h3>
         <p className="text-xs text-muted-foreground mb-2">{hero.title}</p>
 
         {/* Stats preview */}
