@@ -2,95 +2,80 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
-All colors MUST be HSL.
-*/
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Spectral:wght@400;500;600&display=swap');
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    /* Fantasy Dark Theme */
+    --background: 222 47% 8%;
+    --foreground: 45 30% 90%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card: 222 40% 12%;
+    --card-foreground: 45 30% 90%;
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    --popover: 222 45% 10%;
+    --popover-foreground: 45 30% 90%;
 
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
+    /* Gold Primary */
+    --primary: 43 74% 49%;
+    --primary-foreground: 222 47% 8%;
 
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    /* Deep Blue Secondary */
+    --secondary: 220 60% 20%;
+    --secondary-foreground: 45 30% 90%;
 
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --muted: 222 30% 18%;
+    --muted-foreground: 220 15% 55%;
 
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    /* Amber Accent */
+    --accent: 35 90% 55%;
+    --accent-foreground: 222 47% 8%;
 
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    --border: 43 40% 25%;
+    --input: 222 30% 18%;
+    --ring: 43 74% 49%;
 
     --radius: 0.5rem;
 
-    --sidebar-background: 0 0% 98%;
+    /* Game-specific colors */
+    --health: 142 71% 45%;
+    --health-foreground: 142 71% 90%;
+    --mana: 217 91% 60%;
+    --mana-foreground: 217 91% 95%;
+    --energy: 280 70% 55%;
+    --energy-foreground: 280 70% 95%;
+    
+    --tank: 200 80% 50%;
+    --attack: 0 75% 55%;
+    --support: 142 65% 45%;
 
-    --sidebar-foreground: 240 5.3% 26.1%;
+    --hex-base: 222 35% 15%;
+    --hex-hover: 222 35% 22%;
+    --hex-obstacle: 222 20% 8%;
+    --hex-player: 200 70% 35%;
+    --hex-enemy: 0 70% 35%;
+    --hex-selected: 43 74% 49%;
+    --hex-movement: 142 50% 30%;
 
-    --sidebar-primary: 240 5.9% 10%;
+    /* Typography */
+    --font-display: 'Cinzel', serif;
+    --font-body: 'Spectral', serif;
 
-    --sidebar-primary-foreground: 0 0% 98%;
+    /* Shadows */
+    --shadow-gold: 0 0 20px hsl(43 74% 49% / 0.3);
+    --shadow-card: 0 8px 32px hsl(222 47% 5% / 0.5);
 
-    --sidebar-accent: 240 4.8% 95.9%;
-
-    --sidebar-accent-foreground: 240 5.9% 10%;
-
-    --sidebar-border: 220 13% 91%;
-
-    --sidebar-ring: 217.2 91.2% 59.8%;
-  }
-
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --sidebar-background: 222 40% 12%;
+    --sidebar-foreground: 45 30% 90%;
+    --sidebar-primary: 43 74% 49%;
+    --sidebar-primary-foreground: 222 47% 8%;
+    --sidebar-accent: 222 35% 18%;
+    --sidebar-accent-foreground: 45 30% 90%;
+    --sidebar-border: 43 40% 25%;
+    --sidebar-ring: 43 74% 49%;
   }
 }
 
@@ -101,5 +86,155 @@ All colors MUST be HSL.
 
   body {
     @apply bg-background text-foreground;
+    font-family: var(--font-body);
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+  }
+}
+
+@layer components {
+  .fantasy-border {
+    @apply border-2 border-primary/50 rounded-lg;
+    box-shadow: 
+      inset 0 1px 0 hsl(43 74% 49% / 0.2),
+      0 4px 16px hsl(222 47% 5% / 0.5);
+  }
+
+  .fantasy-button {
+    @apply px-6 py-3 bg-gradient-to-b from-primary to-amber-700 
+           text-primary-foreground font-display font-semibold
+           rounded border-2 border-yellow-600/50
+           hover:from-amber-400 hover:to-amber-600
+           active:from-amber-600 active:to-amber-800
+           transition-all duration-200;
+    box-shadow: 
+      0 4px 0 hsl(35 80% 25%),
+      0 6px 20px hsl(222 47% 5% / 0.5);
+  }
+
+  .fantasy-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 
+      0 6px 0 hsl(35 80% 25%),
+      0 8px 24px hsl(222 47% 5% / 0.6);
+  }
+
+  .fantasy-button:active {
+    transform: translateY(2px);
+    box-shadow: 
+      0 2px 0 hsl(35 80% 25%),
+      0 4px 16px hsl(222 47% 5% / 0.5);
+  }
+
+  .hero-card {
+    @apply relative bg-card rounded-lg overflow-hidden;
+    border: 2px solid hsl(var(--border));
+    box-shadow: var(--shadow-card);
+    transition: all 0.3s ease;
+  }
+
+  .hero-card:hover {
+    border-color: hsl(var(--primary));
+    box-shadow: var(--shadow-gold), var(--shadow-card);
+    transform: translateY(-4px);
+  }
+
+  .hex-tile {
+    @apply transition-all duration-200;
+    fill: hsl(var(--hex-base));
+    stroke: hsl(var(--border));
+    stroke-width: 1;
+  }
+
+  .hex-tile:hover {
+    fill: hsl(var(--hex-hover));
+    cursor: pointer;
+  }
+
+  .hex-obstacle {
+    fill: hsl(var(--hex-obstacle));
+    stroke: hsl(var(--muted-foreground) / 0.3);
+  }
+
+  .hex-selected {
+    fill: hsl(var(--hex-selected) / 0.4);
+    stroke: hsl(var(--hex-selected));
+    stroke-width: 2;
+  }
+
+  .hex-movement {
+    fill: hsl(var(--hex-movement) / 0.4);
+    stroke: hsl(var(--health));
+    stroke-width: 2;
+  }
+
+  .stat-bar {
+    @apply h-2 rounded-full overflow-hidden bg-muted;
+  }
+
+  .stat-bar-health {
+    @apply bg-gradient-to-r from-green-600 to-green-400;
+  }
+
+  .stat-bar-energy {
+    @apply bg-gradient-to-r from-purple-600 to-purple-400;
+  }
+
+  .role-badge {
+    @apply px-2 py-0.5 rounded text-xs font-semibold uppercase tracking-wide;
+  }
+
+  .role-tank {
+    @apply bg-sky-600/30 text-sky-300 border border-sky-500/50;
+  }
+
+  .role-attack {
+    @apply bg-red-600/30 text-red-300 border border-red-500/50;
+  }
+
+  .role-support {
+    @apply bg-green-600/30 text-green-300 border border-green-500/50;
+  }
+
+  .skill-icon {
+    @apply w-12 h-12 rounded-lg flex items-center justify-center
+           border-2 border-primary/30 bg-muted;
+  }
+
+  .skill-passive {
+    @apply border-blue-500/50 bg-blue-900/30;
+  }
+
+  .skill-active {
+    @apply border-amber-500/50 bg-amber-900/30;
+  }
+
+  .skill-ultimate {
+    @apply border-purple-500/50 bg-purple-900/30;
+  }
+}
+
+@layer utilities {
+  .text-shadow-glow {
+    text-shadow: 0 0 10px hsl(var(--primary) / 0.5);
+  }
+
+  .animate-pulse-slow {
+    animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  .animate-float {
+    animation: float 3s ease-in-out infinite;
+  }
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
   }
 }
