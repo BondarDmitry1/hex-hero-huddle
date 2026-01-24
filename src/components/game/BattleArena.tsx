@@ -1,11 +1,13 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useGameStore, BattleUnit, hexDistance } from '@/store/gameStore';
-import { HexGrid, generateObstacles, getMovementRange } from './HexGrid';
+import { HexGrid, generateObstacles, getMovementRange, DamagePopup, AttackAnimation } from './HexGrid';
 import { SkillPanel } from './SkillPanel';
 import { cn } from '@/lib/utils';
 import { ArrowLeft, SkipForward } from 'lucide-react';
 
-const GRID_SIZE = 12;
+// Grid dimensions optimized for visual square (accounting for hex offset)
+const GRID_WIDTH = 10;
+const GRID_HEIGHT = 12;
 
 export const BattleArena = () => {
   const {
@@ -24,32 +26,100 @@ export const BattleArena = () => {
     setHoveredUnit,
   } = useGameStore();
 
-  const [obstacles] = useState(() => generateObstacles(GRID_SIZE, GRID_SIZE, 10));
+  const [obstacles] = useState(() => generateObstacles(GRID_WIDTH, GRID_HEIGHT, 8));
+  const [damagePopups, setDamagePopups] = useState<DamagePopup[]>([]);
+  const [attackAnimations, setAttackAnimations] = useState<AttackAnimation[]>([]);
+  const popupIdRef = useRef(0);
   
   const allUnits = useMemo(() => [...playerUnits, ...enemyUnits], [playerUnits, enemyUnits]);
   const currentUnit = turnOrder[currentUnitIndex];
   const alivePlayerUnits = playerUnits.filter(u => !u.isDead);
   const aliveEnemyUnits = enemyUnits.filter(u => !u.isDead);
   
-  // Check win/lose conditions
   const gameOver = alivePlayerUnits.length === 0 || aliveEnemyUnits.length === 0;
   const playerWon = aliveEnemyUnits.length === 0;
   
   const movementRange = useMemo(() => {
     if (selectedUnit && !selectedUnit.hasMoved && currentUnit?.id === selectedUnit.id) {
-      return getMovementRange(selectedUnit, allUnits, obstacles, GRID_SIZE, GRID_SIZE);
+      return getMovementRange(selectedUnit, allUnits, obstacles, GRID_WIDTH, GRID_HEIGHT);
     }
     return new Set<string>();
   }, [selectedUnit, allUnits, obstacles, currentUnit]);
 
-  // Auto-select current unit at start of turn
+  // Helper to convert hex to pixel for animations
+  const hexToPixel = useCallback((q: number, r: number) => {
+    const HEX_SIZE = 36;
+    const HEX_WIDTH = Math.sqrt(3) * HEX_SIZE;
+    const HEX_HEIGHT = 2 * HEX_SIZE;
+    const x = HEX_SIZE * Math.sqrt(3) * (q + r / 2) + HEX_WIDTH;
+    const y = HEX_SIZE * (3 / 2) * r + HEX_HEIGHT;
+    return { x, y };
+  }, []);
+
+  // Show damage popup
+  const showDamagePopup = useCallback((targetPos: { q: number; r: number }, damage: number, isCrit: boolean) => {
+    const { x, y } = hexToPixel(targetPos.q, targetPos.r);
+    const id = `popup-${popupIdRef.current++}`;
+    
+    setDamagePopups(prev => [...prev, { id, x, y: y - 20, damage, isCrit }]);
+    
+    setTimeout(() => {
+      setDamagePopups(prev => prev.filter(p => p.id !== id));
+    }, 1000);
+  }, [hexToPixel]);
+
+  // Show attack animation
+  const showAttackAnimation = useCallback((
+    attacker: BattleUnit, 
+    target: BattleUnit, 
+    onComplete: () => void
+  ) => {
+    if (!attacker.position || !target.position) {
+      onComplete();
+      return;
+    }
+
+    const from = hexToPixel(attacker.position.q, attacker.position.r);
+    const to = hexToPixel(target.position.q, target.position.r);
+    const id = `attack-${popupIdRef.current++}`;
+    
+    // Choose emoji based on attack type
+    let emoji = '💥';
+    if (attacker.attackRange === 'ranged') {
+      if (attacker.attackType === 'magical') {
+        emoji = attacker.id.includes('fire') ? '🔥' : 
+                attacker.id.includes('frost') ? '❄️' : 
+                attacker.id.includes('necro') ? '💀' :
+                attacker.id.includes('shaman') ? '⚡' : '✨';
+      } else {
+        emoji = '🏹';
+      }
+    }
+    
+    setAttackAnimations(prev => [...prev, {
+      id,
+      fromX: from.x,
+      fromY: from.y,
+      toX: to.x,
+      toY: to.y,
+      type: attacker.attackRange,
+      emoji,
+    }]);
+    
+    setTimeout(() => {
+      setAttackAnimations(prev => prev.filter(a => a.id !== id));
+      onComplete();
+    }, 300);
+  }, [hexToPixel]);
+
+  // Auto-select current unit
   useEffect(() => {
     if (currentUnit && currentUnit.owner === 'player' && !currentUnit.isDead) {
       setSelectedUnit(currentUnit);
     }
   }, [currentUnit, setSelectedUnit]);
 
-  // Simple AI for enemy turns
+  // AI for enemy turns
   useEffect(() => {
     if (currentUnit && currentUnit.owner === 'enemy' && !currentUnit.isDead && !gameOver) {
       const timer = setTimeout(() => {
@@ -65,17 +135,51 @@ export const BattleArena = () => {
           });
           
           if (targets.length > 0) {
-            // Attack lowest health target
             const target = targets.sort((a, b) => a.currentHealth - b.currentHealth)[0];
-            attackUnit(currentUnit, target);
+            
+            showAttackAnimation(currentUnit, target, () => {
+              const result = attackUnit(currentUnit, target);
+              if (target.position) {
+                showDamagePopup(target.position, result.damage, result.isCrit);
+              }
+            });
+            
+            setTimeout(() => {
+              if (!currentUnit.hasMoved) {
+                const range = getMovementRange(currentUnit, allUnits, obstacles, GRID_WIDTH, GRID_HEIGHT);
+                if (range.size > 0) {
+                  const rangeArray = Array.from(range);
+                  let bestPos = rangeArray[0];
+                  let bestDist = Infinity;
+                  
+                  for (const pos of rangeArray) {
+                    const [q, r] = pos.split(',').map(Number);
+                    for (const t of alivePlayerUnits) {
+                      if (t.position) {
+                        const dist = hexDistance({ q, r }, t.position);
+                        if (dist < bestDist) {
+                          bestDist = dist;
+                          bestPos = pos;
+                        }
+                      }
+                    }
+                  }
+                  
+                  const [q, r] = bestPos.split(',').map(Number);
+                  moveUnit(currentUnit, { q, r });
+                }
+              }
+              
+              setTimeout(() => endTurn(), 400);
+            }, 500);
+            return;
           }
         }
         
-        // Then move if haven't attacked
+        // Move towards player if can't attack
         if (!currentUnit.hasMoved) {
-          const range = getMovementRange(currentUnit, allUnits, obstacles, GRID_SIZE, GRID_SIZE);
+          const range = getMovementRange(currentUnit, allUnits, obstacles, GRID_WIDTH, GRID_HEIGHT);
           if (range.size > 0) {
-            // Move towards nearest player unit
             const rangeArray = Array.from(range);
             let bestPos = rangeArray[0];
             let bestDist = Infinity;
@@ -98,21 +202,17 @@ export const BattleArena = () => {
           }
         }
         
-        setTimeout(() => {
-          endTurn();
-        }, 500);
-      }, 800);
+        setTimeout(() => endTurn(), 500);
+      }, 600);
       
       return () => clearTimeout(timer);
     }
-  }, [currentUnit, allUnits, obstacles, moveUnit, endTurn, attackUnit, alivePlayerUnits, gameOver]);
+  }, [currentUnit, allUnits, obstacles, moveUnit, endTurn, attackUnit, alivePlayerUnits, gameOver, showAttackAnimation, showDamagePopup]);
 
   const handleHexClick = useCallback((q: number, r: number) => {
     if (!currentUnit || currentUnit.owner !== 'player' || gameOver) return;
 
     const key = `${q},${r}`;
-    
-    // Check if clicking on a unit
     const clickedUnit = allUnits.find(u => u.position?.q === q && u.position?.r === r && !u.isDead);
     
     // Attack enemy
@@ -123,7 +223,10 @@ export const BattleArena = () => {
         : true;
       
       if (canAttack) {
-        attackUnit(currentUnit, clickedUnit);
+        showAttackAnimation(currentUnit, clickedUnit, () => {
+          const result = attackUnit(currentUnit, clickedUnit);
+          showDamagePopup({ q, r }, result.damage, result.isCrit);
+        });
         return;
       }
     }
@@ -138,7 +241,7 @@ export const BattleArena = () => {
     if (selectedUnit && !selectedUnit.hasMoved && movementRange.has(key) && currentUnit.id === selectedUnit.id) {
       moveUnit(selectedUnit, { q, r });
     }
-  }, [currentUnit, allUnits, selectedUnit, movementRange, moveUnit, attackUnit, setSelectedUnit, gameOver]);
+  }, [currentUnit, allUnits, selectedUnit, movementRange, moveUnit, attackUnit, setSelectedUnit, gameOver, showAttackAnimation, showDamagePopup]);
 
   const handleHexHover = useCallback((q: number, r: number, unit: BattleUnit | null) => {
     if (unit && unit.owner === 'enemy' && currentUnit && currentUnit.owner === 'player' && !currentUnit.hasActed) {
@@ -148,12 +251,9 @@ export const BattleArena = () => {
     }
   }, [currentUnit, setHoveredUnit]);
 
-  const handleEndTurn = () => {
-    endTurn();
-  };
+  const handleEndTurn = () => endTurn();
 
   const handleUseSkill = (skillType: 'active' | 'ultimate') => {
-    // TODO: Implement skill usage
     console.log('Use skill:', skillType);
   };
 
@@ -161,19 +261,17 @@ export const BattleArena = () => {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center animate-fade-in">
+          <div className="text-8xl mb-6">{playerWon ? '🏆' : '💀'}</div>
           <h1 className={cn(
             "text-5xl font-display font-bold mb-4",
             playerWon ? "text-health" : "text-destructive"
           )}>
-            {playerWon ? '🏆 Победа!' : '💀 Поражение'}
+            {playerWon ? 'Победа!' : 'Поражение'}
           </h1>
           <p className="text-xl text-muted-foreground mb-8">
             {playerWon ? 'Вы одержали славную победу!' : 'Ваша армия повержена...'}
           </p>
-          <button
-            onClick={() => setPhase('menu')}
-            className="fantasy-button"
-          >
+          <button onClick={() => setPhase('menu')} className="fantasy-button">
             В главное меню
           </button>
         </div>
@@ -182,10 +280,10 @@ export const BattleArena = () => {
   }
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="h-screen bg-background flex flex-col overflow-hidden">
       {/* Header */}
-      <div className="bg-card border-b border-border p-2">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
+      <div className="flex-shrink-0 bg-card border-b border-border px-4 py-2">
+        <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button
               onClick={() => setPhase('menu')}
@@ -195,9 +293,6 @@ export const BattleArena = () => {
             </button>
             <div>
               <h1 className="text-lg font-display font-bold text-primary">Арена Битвы</h1>
-              <p className="text-xs text-muted-foreground">
-                Раунд {Math.floor(currentUnitIndex / turnOrder.length) + 1}
-              </p>
             </div>
           </div>
 
@@ -228,67 +323,57 @@ export const BattleArena = () => {
       </div>
 
       {/* Battle area */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left sidebar - Player units */}
-        <div className="w-36 bg-secondary/20 border-r border-border p-2 overflow-y-auto">
-          <h3 className="font-display text-xs text-health mb-2">Ваши герои</h3>
+      <div className="flex-1 flex overflow-hidden min-h-0">
+        {/* Left sidebar */}
+        <div className="w-32 flex-shrink-0 bg-secondary/20 border-r border-border p-2 overflow-y-auto">
+          <h3 className="font-display text-xs text-health mb-2">Ваша команда</h3>
           <div className="space-y-1">
             {playerUnits.map((unit) => (
-              <UnitMiniCard
-                key={unit.id}
-                unit={unit}
-                isActive={currentUnit?.id === unit.id}
-              />
+              <UnitMiniCard key={unit.id} unit={unit} isActive={currentUnit?.id === unit.id} />
             ))}
           </div>
         </div>
 
-        {/* Center - Hex grid (square) */}
-        <div className="flex-1 flex flex-col">
-          <div className="flex-1 flex items-center justify-center p-2 overflow-auto">
-            <div className="aspect-square max-w-full max-h-full flex items-center justify-center">
-              <HexGrid
-                width={GRID_SIZE}
-                height={GRID_SIZE}
-                obstacles={obstacles}
-                units={allUnits}
-                selectedUnit={selectedUnit}
-                currentUnit={currentUnit}
-                onHexClick={handleHexClick}
-                onHexHover={handleHexHover}
-                movementRange={movementRange}
-                hoveredEnemy={hoveredUnit}
-              />
-            </div>
+        {/* Center - Hex grid */}
+        <div className="flex-1 flex flex-col min-w-0">
+          <div className="flex-1 flex items-center justify-center p-2 min-h-0">
+            <HexGrid
+              width={GRID_WIDTH}
+              height={GRID_HEIGHT}
+              obstacles={obstacles}
+              units={allUnits}
+              selectedUnit={selectedUnit}
+              currentUnit={currentUnit}
+              onHexClick={handleHexClick}
+              onHexHover={handleHexHover}
+              movementRange={movementRange}
+              hoveredEnemy={hoveredUnit}
+              damagePopups={damagePopups}
+              attackAnimations={attackAnimations}
+            />
           </div>
           
           {/* Battle log */}
-          <div className="h-20 bg-card/50 border-t border-border p-2 overflow-y-auto">
+          <div className="flex-shrink-0 h-16 bg-card/50 border-t border-border px-3 py-2 overflow-y-auto">
             <div className="space-y-0.5">
-              {battleLog.slice(-5).map((log, i) => (
+              {battleLog.slice(-3).map((log, i) => (
                 <p key={i} className="text-xs text-muted-foreground">{log}</p>
               ))}
             </div>
           </div>
         </div>
 
-        {/* Right sidebar - Skills & Enemy units */}
-        <div className="w-64 bg-secondary/20 border-l border-border p-2 overflow-y-auto flex flex-col gap-4">
-          {/* Skill panel for current player unit */}
+        {/* Right sidebar */}
+        <div className="w-56 flex-shrink-0 bg-secondary/20 border-l border-border p-2 overflow-y-auto flex flex-col gap-3">
           {currentUnit && currentUnit.owner === 'player' && (
             <SkillPanel unit={currentUnit} onUseSkill={handleUseSkill} />
           )}
           
-          {/* Enemy units */}
           <div>
             <h3 className="font-display text-xs text-destructive mb-2">Враги</h3>
             <div className="space-y-1">
               {enemyUnits.map((unit) => (
-                <UnitMiniCard
-                  key={unit.id}
-                  unit={unit}
-                  isActive={currentUnit?.id === unit.id}
-                />
+                <UnitMiniCard key={unit.id} unit={unit} isActive={currentUnit?.id === unit.id} />
               ))}
             </div>
           </div>
@@ -296,24 +381,22 @@ export const BattleArena = () => {
       </div>
 
       {/* Turn order bar */}
-      <div className="bg-card border-t border-border p-2">
-        <div className="max-w-7xl mx-auto">
-          <div className="flex gap-1 overflow-x-auto pb-1">
-            {turnOrder.filter(u => !u.isDead).map((unit, index) => (
-              <div
-                key={`${unit.id}-${index}`}
-                className={cn(
-                  'flex-shrink-0 w-8 h-8 rounded flex items-center justify-center border-2 transition-all',
-                  turnOrder.indexOf(unit) === currentUnitIndex && 'ring-2 ring-primary scale-110',
-                  unit.owner === 'player' 
-                    ? 'bg-health/10 border-health/50' 
-                    : 'bg-destructive/10 border-destructive/50'
-                )}
-              >
-                <span className="text-sm">{unit.avatar}</span>
-              </div>
-            ))}
-          </div>
+      <div className="flex-shrink-0 bg-card border-t border-border px-4 py-2">
+        <div className="flex gap-1 overflow-x-auto">
+          {turnOrder.filter(u => !u.isDead).map((unit, index) => (
+            <div
+              key={`${unit.id}-${index}`}
+              className={cn(
+                'flex-shrink-0 w-9 h-9 rounded flex items-center justify-center border-2 transition-all',
+                turnOrder.indexOf(unit) === currentUnitIndex && 'ring-2 ring-primary scale-110',
+                unit.owner === 'player' 
+                  ? 'bg-health/10 border-health/50' 
+                  : 'bg-destructive/10 border-destructive/50'
+              )}
+            >
+              <span className="text-base">{unit.avatar}</span>
+            </div>
+          ))}
         </div>
       </div>
     </div>
@@ -329,7 +412,7 @@ const UnitMiniCard = ({ unit, isActive }: UnitMiniCardProps) => (
   <div
     className={cn(
       'bg-card rounded p-1.5 border transition-all',
-      isActive && 'border-primary',
+      isActive && 'border-primary ring-1 ring-primary',
       unit.isDead && 'opacity-40',
       !isActive && !unit.isDead && 'border-border'
     )}

@@ -1,6 +1,24 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { BattleUnit, hexDistance } from '@/store/gameStore';
 import { cn } from '@/lib/utils';
+
+interface DamagePopup {
+  id: string;
+  x: number;
+  y: number;
+  damage: number;
+  isCrit: boolean;
+}
+
+interface AttackAnimation {
+  id: string;
+  fromX: number;
+  fromY: number;
+  toX: number;
+  toY: number;
+  type: 'melee' | 'ranged';
+  emoji: string;
+}
 
 interface HexGridProps {
   width: number;
@@ -13,28 +31,9 @@ interface HexGridProps {
   onHexHover: (q: number, r: number, unit: BattleUnit | null) => void;
   movementRange?: Set<string>;
   hoveredEnemy: BattleUnit | null;
+  damagePopups: DamagePopup[];
+  attackAnimations: AttackAnimation[];
 }
-
-const HEX_SIZE = 28;
-const HEX_WIDTH = Math.sqrt(3) * HEX_SIZE;
-const HEX_HEIGHT = 2 * HEX_SIZE;
-
-const hexToPixel = (q: number, r: number) => {
-  const x = HEX_SIZE * Math.sqrt(3) * (q + r / 2);
-  const y = HEX_SIZE * (3 / 2) * r;
-  return { x: x + HEX_WIDTH, y: y + HEX_HEIGHT };
-};
-
-const hexPoints = (cx: number, cy: number) => {
-  const points = [];
-  for (let i = 0; i < 6; i++) {
-    const angle = (Math.PI / 3) * i - Math.PI / 6;
-    const x = cx + HEX_SIZE * Math.cos(angle);
-    const y = cy + HEX_SIZE * Math.sin(angle);
-    points.push(`${x},${y}`);
-  }
-  return points.join(' ');
-};
 
 export const HexGrid = ({
   width,
@@ -47,7 +46,31 @@ export const HexGrid = ({
   onHexHover,
   movementRange = new Set(),
   hoveredEnemy,
+  damagePopups = [],
+  attackAnimations = [],
 }: HexGridProps) => {
+  // Calculate hex size based on grid dimensions to make it visually square
+  const HEX_SIZE = 36;
+  const HEX_WIDTH = Math.sqrt(3) * HEX_SIZE;
+  const HEX_HEIGHT = 2 * HEX_SIZE;
+
+  const hexToPixel = (q: number, r: number) => {
+    const x = HEX_SIZE * Math.sqrt(3) * (q + r / 2);
+    const y = HEX_SIZE * (3 / 2) * r;
+    return { x: x + HEX_WIDTH, y: y + HEX_HEIGHT };
+  };
+
+  const hexPoints = (cx: number, cy: number) => {
+    const points = [];
+    for (let i = 0; i < 6; i++) {
+      const angle = (Math.PI / 3) * i - Math.PI / 6;
+      const x = cx + HEX_SIZE * Math.cos(angle);
+      const y = cy + HEX_SIZE * Math.sin(angle);
+      points.push(`${x},${y}`);
+    }
+    return points.join(' ');
+  };
+
   const hexes = useMemo(() => {
     const result = [];
     for (let r = 0; r < height; r++) {
@@ -60,7 +83,6 @@ export const HexGrid = ({
         const isSelected = selectedUnit?.position?.q === q && selectedUnit?.position?.r === r;
         const isCurrent = currentUnit?.position?.q === q && currentUnit?.position?.r === r;
 
-        // Check if this enemy is in attack range
         let isInAttackRange = false;
         let attackDistancePenalty = false;
         if (unit && currentUnit && unit.owner !== currentUnit.owner && currentUnit.position && !currentUnit.hasActed) {
@@ -68,29 +90,18 @@ export const HexGrid = ({
           if (currentUnit.attackRange === 'melee') {
             isInAttackRange = distance <= currentUnit.range;
           } else {
-            isInAttackRange = true; // Ranged can attack anywhere
+            isInAttackRange = true;
             attackDistancePenalty = distance > 5;
           }
         }
 
         result.push({
-          q,
-          r,
-          x,
-          y,
-          key,
-          isObstacle,
-          isMovement,
-          unit,
-          isSelected,
-          isCurrent,
-          isInAttackRange,
-          attackDistancePenalty,
+          q, r, x, y, key, isObstacle, isMovement, unit, isSelected, isCurrent, isInAttackRange, attackDistancePenalty,
         });
       }
     }
     return result;
-  }, [width, height, obstacles, units, selectedUnit, currentUnit, movementRange]);
+  }, [width, height, obstacles, units, selectedUnit, currentUnit, movementRange, hexToPixel]);
 
   const svgWidth = (width + 0.5) * HEX_WIDTH + HEX_WIDTH;
   const svgHeight = height * HEX_HEIGHT * 0.75 + HEX_HEIGHT;
@@ -99,8 +110,25 @@ export const HexGrid = ({
     <svg
       viewBox={`0 0 ${svgWidth} ${svgHeight}`}
       className="w-full h-full"
-      style={{ maxWidth: svgWidth, maxHeight: svgHeight }}
+      preserveAspectRatio="xMidYMid meet"
     >
+      <defs>
+        {/* Glow filter for attacks */}
+        <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+          <feMerge>
+            <feMergeNode in="coloredBlur"/>
+            <feMergeNode in="SourceGraphic"/>
+          </feMerge>
+        </filter>
+        
+        {/* Attack trail gradient */}
+        <linearGradient id="attackTrail" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stopColor="hsl(0 70% 50%)" stopOpacity="0"/>
+          <stop offset="100%" stopColor="hsl(0 70% 50%)" stopOpacity="1"/>
+        </linearGradient>
+      </defs>
+
       {/* Grid hexes */}
       {hexes.map(({ q, r, x, y, key, isObstacle, isMovement, unit, isSelected, isCurrent, isInAttackRange, attackDistancePenalty }) => (
         <g 
@@ -124,44 +152,56 @@ export const HexGrid = ({
           
           {/* Unit display */}
           {unit && (
-            <>
+            <g className={cn(
+              'transition-transform duration-200',
+              isInAttackRange && hoveredEnemy?.id === unit.id && 'animate-pulse'
+            )}>
+              {/* Unit shadow */}
+              <ellipse
+                cx={x}
+                cy={y + HEX_SIZE * 0.6}
+                rx={HEX_SIZE * 0.5}
+                ry={HEX_SIZE * 0.15}
+                className="fill-black/30"
+              />
+              
               {/* Unit background circle */}
               <circle
                 cx={x}
                 cy={y}
-                r={HEX_SIZE * 0.75}
+                r={HEX_SIZE * 0.8}
                 className={cn(
-                  'fill-card stroke-2 transition-all',
+                  'fill-card stroke-[3px] transition-all',
                   unit.owner === 'player' ? 'stroke-health' : 'stroke-destructive',
-                  isCurrent && 'stroke-primary stroke-[3px]',
-                  isInAttackRange && hoveredEnemy?.id === unit.id && 'stroke-accent stroke-[3px]'
+                  isCurrent && 'stroke-primary stroke-[4px] filter drop-shadow-lg'
                 )}
               />
               
               {/* Unit avatar */}
               <text
                 x={x}
-                y={y + 4}
+                y={y + 6}
                 textAnchor="middle"
-                className="text-base select-none pointer-events-none"
+                className="text-xl select-none pointer-events-none"
               >
                 {unit.avatar}
               </text>
               
               {/* Attack indicator */}
               {isInAttackRange && hoveredEnemy?.id === unit.id && (
-                <g>
+                <g className="animate-bounce">
                   <circle
-                    cx={x + HEX_SIZE * 0.5}
-                    cy={y - HEX_SIZE * 0.5}
-                    r={10}
+                    cx={x + HEX_SIZE * 0.6}
+                    cy={y - HEX_SIZE * 0.6}
+                    r={12}
                     className="fill-destructive"
+                    filter="url(#glow)"
                   />
                   <text
-                    x={x + HEX_SIZE * 0.5}
-                    y={y - HEX_SIZE * 0.5 + 4}
+                    x={x + HEX_SIZE * 0.6}
+                    y={y - HEX_SIZE * 0.6 + 5}
                     textAnchor="middle"
-                    className="text-xs fill-white select-none pointer-events-none"
+                    className="text-sm fill-white font-bold select-none pointer-events-none"
                   >
                     {attackDistancePenalty ? '½' : '⚔'}
                   </text>
@@ -169,18 +209,14 @@ export const HexGrid = ({
               )}
               
               {/* Health bar */}
-              <g transform={`translate(${x - 12}, ${y + HEX_SIZE * 0.55})`}>
+              <g transform={`translate(${x - 16}, ${y + HEX_SIZE * 0.65})`}>
+                <rect width={32} height={5} rx={2.5} className="fill-muted" />
                 <rect
-                  width={24}
-                  height={4}
-                  rx={2}
-                  className="fill-muted"
-                />
-                <rect
-                  width={24 * (unit.currentHealth / unit.maxHealth)}
-                  height={4}
-                  rx={2}
+                  width={32 * (unit.currentHealth / unit.maxHealth)}
+                  height={5}
+                  rx={2.5}
                   className={cn(
+                    'transition-all duration-300',
                     unit.currentHealth / unit.maxHealth > 0.5 
                       ? 'fill-health' 
                       : unit.currentHealth / unit.maxHealth > 0.25 
@@ -192,29 +228,90 @@ export const HexGrid = ({
               
               {/* Energy bar */}
               {unit.currentEnergy > 0 && (
-                <g transform={`translate(${x - 12}, ${y + HEX_SIZE * 0.55 + 5})`}>
+                <g transform={`translate(${x - 16}, ${y + HEX_SIZE * 0.65 + 6})`}>
                   <rect
-                    width={24 * (unit.currentEnergy / unit.maxEnergy)}
-                    height={2}
-                    rx={1}
-                    className="fill-energy"
+                    width={32 * (unit.currentEnergy / unit.maxEnergy)}
+                    height={3}
+                    rx={1.5}
+                    className="fill-energy transition-all duration-300"
                   />
                 </g>
               )}
-            </>
+            </g>
           )}
           
           {/* Obstacle display */}
           {isObstacle && (
             <text
               x={x}
-              y={y + 4}
+              y={y + 6}
               textAnchor="middle"
-              className="text-sm select-none pointer-events-none fill-muted-foreground/50"
+              className="text-lg select-none pointer-events-none"
             >
               🪨
             </text>
           )}
+        </g>
+      ))}
+      
+      {/* Attack animations */}
+      {attackAnimations.map((anim) => (
+        <g key={anim.id} className="attack-projectile">
+          {anim.type === 'ranged' ? (
+            <>
+              {/* Trail */}
+              <line
+                x1={anim.fromX}
+                y1={anim.fromY}
+                x2={anim.toX}
+                y2={anim.toY}
+                stroke="url(#attackTrail)"
+                strokeWidth="4"
+                className="animate-fade-in"
+              />
+              {/* Projectile */}
+              <text
+                x={anim.toX}
+                y={anim.toY}
+                textAnchor="middle"
+                className="text-2xl animate-scale-in"
+                filter="url(#glow)"
+              >
+                {anim.emoji}
+              </text>
+            </>
+          ) : (
+            /* Melee slash effect */
+            <g>
+              <text
+                x={anim.toX}
+                y={anim.toY}
+                textAnchor="middle"
+                className="text-3xl animate-scale-in"
+                filter="url(#glow)"
+              >
+                💥
+              </text>
+            </g>
+          )}
+        </g>
+      ))}
+      
+      {/* Damage popups */}
+      {damagePopups.map((popup) => (
+        <g key={popup.id} className="damage-popup">
+          <text
+            x={popup.x}
+            y={popup.y}
+            textAnchor="middle"
+            className={cn(
+              'font-display font-bold select-none pointer-events-none',
+              popup.isCrit ? 'text-2xl fill-amber-400' : 'text-xl fill-destructive'
+            )}
+            filter="url(#glow)"
+          >
+            {popup.isCrit ? `💥${popup.damage}` : `-${popup.damage}`}
+          </text>
         </g>
       ))}
     </svg>
@@ -225,8 +322,6 @@ export const HexGrid = ({
 export const generateObstacles = (width: number, height: number, count: number): Set<string> => {
   const obstacles = new Set<string>();
   const midQ = Math.floor(width / 2);
-  
-  // Avoid spawn zones (left 2 columns and right 2 columns)
   const validQRange = { min: 2, max: width - 3 };
   
   let placed = 0;
@@ -235,8 +330,6 @@ export const generateObstacles = (width: number, height: number, count: number):
   
   while (placed < count && attempts < maxAttempts) {
     attempts++;
-    
-    // Generate random position in left half
     const q = Math.floor(Math.random() * (midQ - validQRange.min)) + validQRange.min;
     const r = Math.floor(Math.random() * height);
     
@@ -307,3 +400,5 @@ export const getMovementRange = (
   
   return range;
 };
+
+export type { DamagePopup, AttackAnimation };
