@@ -1,6 +1,6 @@
 import { Hero, calculateDamageReduction } from '@/data/heroes';
 import { cn } from '@/lib/utils';
-import { X, Heart, Swords, Shield, Zap, Move } from 'lucide-react';
+import { X, Heart, Swords, Shield, Zap, Move, Target, Crosshair } from 'lucide-react';
 
 interface HeroDetailProps {
   hero: Hero;
@@ -21,6 +21,7 @@ export const HeroDetail = ({ hero, onClose }: HeroDetailProps) => {
   }[hero.role];
 
   const attackTypeLabel = hero.attackType === 'physical' ? 'Физический' : 'Магический';
+  const rangeLabel = hero.attackRange === 'melee' ? 'Ближний бой' : 'Дальний бой';
 
   return (
     <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
@@ -34,8 +35,11 @@ export const HeroDetail = ({ hero, onClose }: HeroDetailProps) => {
           >
             <X className="w-5 h-5" />
           </button>
-          <div className="absolute bottom-4 left-4">
+          <div className="absolute bottom-4 left-4 flex gap-2">
             <span className={cn('role-badge', roleClass)}>{roleLabel}</span>
+            <span className="role-badge bg-muted text-foreground border-border">
+              {hero.attackRange === 'melee' ? '⚔️' : '🎯'} {rangeLabel}
+            </span>
           </div>
         </div>
 
@@ -55,6 +59,14 @@ export const HeroDetail = ({ hero, onClose }: HeroDetailProps) => {
               icon={<Swords className="w-5 h-5 text-destructive" />} 
               label={`Атака (${attackTypeLabel})`} 
               value={hero.attack} 
+            />
+            <StatBox 
+              icon={hero.attackRange === 'melee' 
+                ? <Target className="w-5 h-5 text-primary" /> 
+                : <Crosshair className="w-5 h-5 text-primary" />
+              } 
+              label="Дальность" 
+              value={`${hero.range} ${hero.range === 1 ? 'гекс' : 'гексов'}`} 
             />
             <StatBox 
               icon={<Shield className="w-5 h-5 text-tank" />} 
