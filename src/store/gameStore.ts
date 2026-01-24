@@ -18,7 +18,6 @@ interface GameState {
   phase: GamePhase;
   setPhase: (phase: GamePhase) => void;
   
-  // Draft state
   playerDraft: Hero[];
   enemyDraft: Hero[];
   availableHeroes: Hero[];
@@ -26,7 +25,6 @@ interface GameState {
   addToDraft: (hero: Hero, player: Player) => void;
   resetDraft: () => void;
   
-  // Battle state
   playerUnits: BattleUnit[];
   enemyUnits: BattleUnit[];
   currentTurn: Player;
@@ -42,16 +40,13 @@ interface GameState {
   attackUnit: (attacker: BattleUnit, target: BattleUnit) => { damage: number; isCrit: boolean };
   endTurn: () => void;
   
-  // Battle log
   battleLog: string[];
   addBattleLog: (message: string) => void;
   
-  // Hero detail view
   selectedHeroId: string | null;
   setSelectedHeroId: (id: string | null) => void;
 }
 
-// Calculate hex distance
 export const hexDistance = (a: { q: number; r: number }, b: { q: number; r: number }): number => {
   return Math.max(
     Math.abs(a.q - b.q),
@@ -64,7 +59,6 @@ export const useGameStore = create<GameState>((set, get) => ({
   phase: 'menu',
   setPhase: (phase) => set({ phase }),
   
-  // Draft
   playerDraft: [],
   enemyDraft: [],
   availableHeroes: [...heroes],
@@ -86,7 +80,6 @@ export const useGameStore = create<GameState>((set, get) => ({
       });
     }
     
-    // Auto-pick for enemy (simple AI)
     const newState = get();
     if (newState.currentDrafter === 'enemy' && newState.enemyDraft.length < 5 && newState.availableHeroes.length > 0) {
       setTimeout(() => {
@@ -98,7 +91,6 @@ export const useGameStore = create<GameState>((set, get) => ({
       }, 500);
     }
     
-    // Check if draft is complete
     const finalState = get();
     if (finalState.playerDraft.length === 5 && finalState.enemyDraft.length === 5) {
       setTimeout(() => {
@@ -116,7 +108,6 @@ export const useGameStore = create<GameState>((set, get) => ({
     battleLog: [],
   }),
   
-  // Battle
   playerUnits: [],
   enemyUnits: [],
   currentTurn: 'player',
@@ -133,10 +124,11 @@ export const useGameStore = create<GameState>((set, get) => ({
   initializeBattle: () => {
     const state = get();
     
+    // Position units on smaller grid (10 wide)
     const playerUnits: BattleUnit[] = state.playerDraft.map((hero, index) => ({
       ...hero,
       owner: 'player' as Player,
-      position: { q: 0, r: 2 + index * 2 },
+      position: { q: 0, r: 1 + index * 2 },
       currentHealth: hero.health,
       currentEnergy: 0,
       hasMoved: false,
@@ -147,7 +139,7 @@ export const useGameStore = create<GameState>((set, get) => ({
     const enemyUnits: BattleUnit[] = state.enemyDraft.map((hero, index) => ({
       ...hero,
       owner: 'enemy' as Player,
-      position: { q: 11, r: 2 + index * 2 },
+      position: { q: 9, r: 1 + index * 2 },
       currentHealth: hero.health,
       currentEnergy: 0,
       hasMoved: false,
@@ -182,7 +174,6 @@ export const useGameStore = create<GameState>((set, get) => ({
       set({ enemyUnits: updateUnits(state.enemyUnits) });
     }
     
-    // Update turn order and selected unit
     const updatedTurnOrder = state.turnOrder.map(u => 
       u.id === unit.id ? { ...u, position, hasMoved: true } : u
     );
@@ -205,12 +196,10 @@ export const useGameStore = create<GameState>((set, get) => ({
     
     const distance = hexDistance(attacker.position, target.position);
     
-    // Check if in range
     if (attacker.attackRange === 'melee' && distance > attacker.range) {
       return { damage: 0, isCrit: false };
     }
     
-    // Calculate base damage
     let damage = calculateDamage(
       attacker.attack,
       attacker.attackType,
@@ -218,29 +207,24 @@ export const useGameStore = create<GameState>((set, get) => ({
       target.magicalDefense
     );
     
-    // Ranged penalty: half damage if > 5 hexes
     if (attacker.attackRange === 'ranged' && distance > 5) {
       damage = Math.floor(damage / 2);
     }
     
-    // Simple crit chance (10%)
     const isCrit = Math.random() < 0.1;
     if (isCrit) {
       damage = Math.floor(damage * 1.5);
     }
     
-    // Apply damage
     const newHealth = Math.max(0, target.currentHealth - damage);
     const isDead = newHealth === 0;
     
-    // Energy gain
     const attackerEnergy = Math.min(attacker.maxEnergy, attacker.currentEnergy + 15);
     const targetEnergy = isDead ? 0 : Math.min(target.maxEnergy, target.currentEnergy + 10);
     
     const updateUnit = (units: BattleUnit[], unitId: string, updates: Partial<BattleUnit>) =>
       units.map(u => u.id === unitId ? { ...u, ...updates } : u);
     
-    // Update attacker
     const attackerUpdates = { hasActed: true, currentEnergy: attackerEnergy };
     if (attacker.owner === 'player') {
       set({ playerUnits: updateUnit(state.playerUnits, attacker.id, attackerUpdates) });
@@ -248,7 +232,6 @@ export const useGameStore = create<GameState>((set, get) => ({
       set({ enemyUnits: updateUnit(state.enemyUnits, attacker.id, attackerUpdates) });
     }
     
-    // Update target
     const targetUpdates = { currentHealth: newHealth, currentEnergy: targetEnergy, isDead };
     if (target.owner === 'player') {
       set({ playerUnits: updateUnit(state.playerUnits, target.id, targetUpdates) });
@@ -256,7 +239,6 @@ export const useGameStore = create<GameState>((set, get) => ({
       set({ enemyUnits: updateUnit(state.enemyUnits, target.id, targetUpdates) });
     }
     
-    // Update turn order
     set({
       turnOrder: state.turnOrder.map(u => {
         if (u.id === attacker.id) return { ...u, ...attackerUpdates };
@@ -268,11 +250,10 @@ export const useGameStore = create<GameState>((set, get) => ({
         : state.selectedUnit,
     });
     
-    // Battle log
     const critText = isCrit ? ' 💥КРИТ!' : '';
     const distanceText = attacker.attackRange === 'ranged' && distance > 5 ? ' (дальность -50%)' : '';
     const killText = isDead ? ` ☠️ ${target.name} повержен!` : '';
-    get().addBattleLog(`${attacker.avatar} ${attacker.name} атакует ${target.avatar} ${target.name}: ${damage} урона${critText}${distanceText}${killText}`);
+    get().addBattleLog(`${attacker.avatar} → ${target.avatar}: ${damage} урона${critText}${distanceText}${killText}`);
     
     return { damage, isCrit };
   },
@@ -280,7 +261,6 @@ export const useGameStore = create<GameState>((set, get) => ({
   endTurn: () => {
     const state = get();
     
-    // Find next alive unit
     let nextIndex = state.currentUnitIndex;
     let attempts = 0;
     do {
@@ -288,7 +268,6 @@ export const useGameStore = create<GameState>((set, get) => ({
       attempts++;
     } while (state.turnOrder[nextIndex]?.isDead && attempts < state.turnOrder.length);
     
-    // Reset all units when round completes
     if (nextIndex <= state.currentUnitIndex || attempts >= state.turnOrder.length) {
       const resetUnits = (units: BattleUnit[]) =>
         units.map(u => ({ ...u, hasMoved: false, hasActed: false }));
@@ -308,7 +287,6 @@ export const useGameStore = create<GameState>((set, get) => ({
     });
   },
   
-  // Hero detail
   selectedHeroId: null,
   setSelectedHeroId: (id) => set({ selectedHeroId: id }),
 }));
