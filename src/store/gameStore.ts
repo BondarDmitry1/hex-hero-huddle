@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Hero, heroes } from '@/data/heroes';
+import { Hero, heroes, calculateDamage } from '@/data/heroes';
 
 export type GamePhase = 'menu' | 'heroes' | 'draft' | 'placement' | 'battle';
 export type Player = 'player' | 'enemy';
@@ -11,6 +11,7 @@ export interface BattleUnit extends Hero {
   currentEnergy: number;
   hasMoved: boolean;
   hasActed: boolean;
+  isDead: boolean;
 }
 
 interface GameState {
@@ -32,16 +33,32 @@ interface GameState {
   turnOrder: BattleUnit[];
   currentUnitIndex: number;
   selectedUnit: BattleUnit | null;
+  hoveredUnit: BattleUnit | null;
   
   initializeBattle: () => void;
   setSelectedUnit: (unit: BattleUnit | null) => void;
+  setHoveredUnit: (unit: BattleUnit | null) => void;
   moveUnit: (unit: BattleUnit, position: { q: number; r: number }) => void;
+  attackUnit: (attacker: BattleUnit, target: BattleUnit) => { damage: number; isCrit: boolean };
   endTurn: () => void;
+  
+  // Battle log
+  battleLog: string[];
+  addBattleLog: (message: string) => void;
   
   // Hero detail view
   selectedHeroId: string | null;
   setSelectedHeroId: (id: string | null) => void;
 }
+
+// Calculate hex distance
+export const hexDistance = (a: { q: number; r: number }, b: { q: number; r: number }): number => {
+  return Math.max(
+    Math.abs(a.q - b.q),
+    Math.abs(a.r - b.r),
+    Math.abs((a.q + a.r) - (b.q + b.r))
+  );
+};
 
 export const useGameStore = create<GameState>((set, get) => ({
   phase: 'menu',
@@ -96,6 +113,7 @@ export const useGameStore = create<GameState>((set, get) => ({
     enemyDraft: [],
     availableHeroes: [...heroes],
     currentDrafter: 'player',
+    battleLog: [],
   }),
   
   // Battle
@@ -105,6 +123,12 @@ export const useGameStore = create<GameState>((set, get) => ({
   turnOrder: [],
   currentUnitIndex: 0,
   selectedUnit: null,
+  hoveredUnit: null,
+  battleLog: [],
+  
+  addBattleLog: (message) => {
+    set(state => ({ battleLog: [...state.battleLog.slice(-19), message] }));
+  },
   
   initializeBattle: () => {
     const state = get();
@@ -117,6 +141,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       currentEnergy: 0,
       hasMoved: false,
       hasActed: false,
+      isDead: false,
     }));
     
     const enemyUnits: BattleUnit[] = state.enemyDraft.map((hero, index) => ({
@@ -127,10 +152,11 @@ export const useGameStore = create<GameState>((set, get) => ({
       currentEnergy: 0,
       hasMoved: false,
       hasActed: false,
+      isDead: false,
     }));
     
     const allUnits = [...playerUnits, ...enemyUnits];
-    const turnOrder = allUnits.sort((a, b) => b.initiative - a.initiative);
+    const turnOrder = [...allUnits].sort((a, b) => b.initiative - a.initiative);
     
     set({
       playerUnits,
@@ -138,10 +164,12 @@ export const useGameStore = create<GameState>((set, get) => ({
       turnOrder,
       currentUnitIndex: 0,
       phase: 'battle',
+      battleLog: ['⚔️ Битва началась!'],
     });
   },
   
   setSelectedUnit: (unit) => set({ selectedUnit: unit }),
+  setHoveredUnit: (unit) => set({ hoveredUnit: unit }),
   
   moveUnit: (unit, position) => {
     const state = get();
@@ -154,18 +182,114 @@ export const useGameStore = create<GameState>((set, get) => ({
       set({ enemyUnits: updateUnits(state.enemyUnits) });
     }
     
+    // Update turn order and selected unit
+    const updatedTurnOrder = state.turnOrder.map(u => 
+      u.id === unit.id ? { ...u, position, hasMoved: true } : u
+    );
+    const updatedSelectedUnit = state.selectedUnit?.id === unit.id 
+      ? { ...state.selectedUnit, position, hasMoved: true } 
+      : state.selectedUnit;
+    
+    set({
+      turnOrder: updatedTurnOrder,
+      selectedUnit: updatedSelectedUnit,
+    });
+  },
+  
+  attackUnit: (attacker, target) => {
+    const state = get();
+    
+    if (!attacker.position || !target.position) {
+      return { damage: 0, isCrit: false };
+    }
+    
+    const distance = hexDistance(attacker.position, target.position);
+    
+    // Check if in range
+    if (attacker.attackRange === 'melee' && distance > attacker.range) {
+      return { damage: 0, isCrit: false };
+    }
+    
+    // Calculate base damage
+    let damage = calculateDamage(
+      attacker.attack,
+      attacker.attackType,
+      target.physicalDefense,
+      target.magicalDefense
+    );
+    
+    // Ranged penalty: half damage if > 5 hexes
+    if (attacker.attackRange === 'ranged' && distance > 5) {
+      damage = Math.floor(damage / 2);
+    }
+    
+    // Simple crit chance (10%)
+    const isCrit = Math.random() < 0.1;
+    if (isCrit) {
+      damage = Math.floor(damage * 1.5);
+    }
+    
+    // Apply damage
+    const newHealth = Math.max(0, target.currentHealth - damage);
+    const isDead = newHealth === 0;
+    
+    // Energy gain
+    const attackerEnergy = Math.min(attacker.maxEnergy, attacker.currentEnergy + 15);
+    const targetEnergy = isDead ? 0 : Math.min(target.maxEnergy, target.currentEnergy + 10);
+    
+    const updateUnit = (units: BattleUnit[], unitId: string, updates: Partial<BattleUnit>) =>
+      units.map(u => u.id === unitId ? { ...u, ...updates } : u);
+    
+    // Update attacker
+    const attackerUpdates = { hasActed: true, currentEnergy: attackerEnergy };
+    if (attacker.owner === 'player') {
+      set({ playerUnits: updateUnit(state.playerUnits, attacker.id, attackerUpdates) });
+    } else {
+      set({ enemyUnits: updateUnit(state.enemyUnits, attacker.id, attackerUpdates) });
+    }
+    
+    // Update target
+    const targetUpdates = { currentHealth: newHealth, currentEnergy: targetEnergy, isDead };
+    if (target.owner === 'player') {
+      set({ playerUnits: updateUnit(state.playerUnits, target.id, targetUpdates) });
+    } else {
+      set({ enemyUnits: updateUnit(state.enemyUnits, target.id, targetUpdates) });
+    }
+    
     // Update turn order
     set({
-      turnOrder: state.turnOrder.map(u => u.id === unit.id ? { ...u, position, hasMoved: true } : u),
+      turnOrder: state.turnOrder.map(u => {
+        if (u.id === attacker.id) return { ...u, ...attackerUpdates };
+        if (u.id === target.id) return { ...u, ...targetUpdates };
+        return u;
+      }),
+      selectedUnit: state.selectedUnit?.id === attacker.id 
+        ? { ...state.selectedUnit, ...attackerUpdates } 
+        : state.selectedUnit,
     });
+    
+    // Battle log
+    const critText = isCrit ? ' 💥КРИТ!' : '';
+    const distanceText = attacker.attackRange === 'ranged' && distance > 5 ? ' (дальность -50%)' : '';
+    const killText = isDead ? ` ☠️ ${target.name} повержен!` : '';
+    get().addBattleLog(`${attacker.avatar} ${attacker.name} атакует ${target.avatar} ${target.name}: ${damage} урона${critText}${distanceText}${killText}`);
+    
+    return { damage, isCrit };
   },
   
   endTurn: () => {
     const state = get();
-    const nextIndex = (state.currentUnitIndex + 1) % state.turnOrder.length;
+    
+    // Find next alive unit
+    let nextIndex = state.currentUnitIndex;
+    let attempts = 0;
+    do {
+      nextIndex = (nextIndex + 1) % state.turnOrder.length;
+      attempts++;
+    } while (state.turnOrder[nextIndex]?.isDead && attempts < state.turnOrder.length);
     
     // Reset all units when round completes
-    if (nextIndex === 0) {
+    if (nextIndex <= state.currentUnitIndex || attempts >= state.turnOrder.length) {
       const resetUnits = (units: BattleUnit[]) =>
         units.map(u => ({ ...u, hasMoved: false, hasActed: false }));
       
@@ -174,6 +298,8 @@ export const useGameStore = create<GameState>((set, get) => ({
         enemyUnits: resetUnits(state.enemyUnits),
         turnOrder: resetUnits(state.turnOrder),
       });
+      
+      get().addBattleLog('🔄 Новый раунд!');
     }
     
     set({

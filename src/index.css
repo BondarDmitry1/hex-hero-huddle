@@ -142,7 +142,7 @@
   }
 
   .hex-tile {
-    @apply transition-all duration-200;
+    @apply transition-all duration-150;
     fill: hsl(var(--hex-base));
     stroke: hsl(var(--border));
     stroke-width: 1;
@@ -150,7 +150,6 @@
 
   .hex-tile:hover {
     fill: hsl(var(--hex-hover));
-    cursor: pointer;
   }
 
   .hex-obstacle {
@@ -164,9 +163,21 @@
     stroke-width: 2;
   }
 
+  .hex-current {
+    fill: hsl(var(--hex-player) / 0.3);
+    stroke: hsl(var(--primary));
+    stroke-width: 2;
+  }
+
   .hex-movement {
     fill: hsl(var(--hex-movement) / 0.4);
     stroke: hsl(var(--health));
+    stroke-width: 2;
+  }
+
+  .hex-attack {
+    fill: hsl(0 70% 35% / 0.4);
+    stroke: hsl(var(--destructive));
     stroke-width: 2;
   }
 
