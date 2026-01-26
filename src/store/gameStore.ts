@@ -3,6 +3,7 @@ import { Hero, heroes, calculateDamage } from '@/data/heroes';
 
 export type GamePhase = 'menu' | 'heroes' | 'draft' | 'placement' | 'battle';
 export type Player = 'player' | 'enemy';
+export type SkillMode = null | 'active' | 'ultimate';
 
 export interface BattleUnit extends Hero {
   owner: Player;
@@ -12,6 +13,13 @@ export interface BattleUnit extends Hero {
   hasMoved: boolean;
   hasActed: boolean;
   isDead: boolean;
+  buffs?: { type: string; duration: number; value?: number }[];
+}
+
+export interface SkillResult {
+  type: 'damage' | 'heal' | 'buff' | 'area';
+  targets: { unit: BattleUnit; value: number }[];
+  message: string;
 }
 
 interface GameState {
@@ -33,11 +41,18 @@ interface GameState {
   selectedUnit: BattleUnit | null;
   hoveredUnit: BattleUnit | null;
   
+  // Skill mode
+  skillMode: SkillMode;
+  setSkillMode: (mode: SkillMode) => void;
+  skillRange: Set<string>;
+  setSkillRange: (range: Set<string>) => void;
+  
   initializeBattle: () => void;
   setSelectedUnit: (unit: BattleUnit | null) => void;
   setHoveredUnit: (unit: BattleUnit | null) => void;
   moveUnit: (unit: BattleUnit, position: { q: number; r: number }) => void;
   attackUnit: (attacker: BattleUnit, target: BattleUnit) => { damage: number; isCrit: boolean };
+  useSkill: (caster: BattleUnit, targetPos: { q: number; r: number }, skillType: 'active' | 'ultimate') => SkillResult | null;
   endTurn: () => void;
   
   battleLog: string[];
@@ -47,11 +62,21 @@ interface GameState {
   setSelectedHeroId: (id: string | null) => void;
 }
 
+// Convert offset coordinates to cube coordinates for accurate distance
+const offsetToCube = (q: number, r: number) => {
+  const x = q - Math.floor(r / 2);
+  const z = r;
+  const y = -x - z;
+  return { x, y, z };
+};
+
 export const hexDistance = (a: { q: number; r: number }, b: { q: number; r: number }): number => {
+  const cubeA = offsetToCube(a.q, a.r);
+  const cubeB = offsetToCube(b.q, b.r);
   return Math.max(
-    Math.abs(a.q - b.q),
-    Math.abs(a.r - b.r),
-    Math.abs((a.q + a.r) - (b.q + b.r))
+    Math.abs(cubeA.x - cubeB.x),
+    Math.abs(cubeA.y - cubeB.y),
+    Math.abs(cubeA.z - cubeB.z)
   );
 };
 
@@ -116,6 +141,12 @@ export const useGameStore = create<GameState>((set, get) => ({
   selectedUnit: null,
   hoveredUnit: null,
   battleLog: [],
+  
+  // Skill mode
+  skillMode: null,
+  setSkillMode: (mode) => set({ skillMode: mode }),
+  skillRange: new Set<string>(),
+  setSkillRange: (range) => set({ skillRange: range }),
   
   addBattleLog: (message) => {
     set(state => ({ battleLog: [...state.battleLog.slice(-19), message] }));
@@ -284,7 +315,216 @@ export const useGameStore = create<GameState>((set, get) => ({
     set({
       currentUnitIndex: nextIndex,
       selectedUnit: null,
+      skillMode: null,
+      skillRange: new Set<string>(),
     });
+  },
+  
+  useSkill: (caster, targetPos, skillType) => {
+    const state = get();
+    const skill = skillType === 'active' ? caster.skills.active : caster.skills.ultimate;
+    const allUnits = [...state.playerUnits, ...state.enemyUnits];
+    
+    // Find target at position
+    const target = allUnits.find(u => 
+      u.position?.q === targetPos.q && u.position?.r === targetPos.r && !u.isDead
+    );
+    
+    // Handle different skill types based on hero
+    let result: SkillResult | null = null;
+    const targets: { unit: BattleUnit; value: number }[] = [];
+    
+    // Determine skill effect based on hero and skill
+    if (skillType === 'ultimate' && caster.currentEnergy < (skill.energyCost || 100)) {
+      return null;
+    }
+    
+    // Get enemies and allies based on caster
+    const enemies = caster.owner === 'player' ? state.enemyUnits : state.playerUnits;
+    const allies = caster.owner === 'player' ? state.playerUnits : state.enemyUnits;
+    
+    // Calculate skill effects based on hero type
+    switch (caster.id) {
+      // Tank skills
+      case 'ironclad':
+      case 'stone_giant':
+      case 'paladin':
+        if (skillType === 'active') {
+          // Area damage for tanks
+          const areaTargets = enemies.filter(e => {
+            if (!e.position || !caster.position) return false;
+            return hexDistance(caster.position, e.position) <= 2 && !e.isDead;
+          });
+          areaTargets.forEach(t => {
+            const damage = Math.floor(caster.attack * 0.6);
+            targets.push({ unit: t, value: damage });
+          });
+          result = { type: 'area', targets, message: `${caster.avatar} использует ${skill.name}!` };
+        } else {
+          // Self buff for ultimate
+          targets.push({ unit: caster, value: 50 });
+          result = { type: 'buff', targets, message: `${caster.avatar} активирует ${skill.name}!` };
+        }
+        break;
+        
+      // Attack skills
+      case 'shadow_blade':
+      case 'berserker':
+        if (skillType === 'active' && target) {
+          const damage = Math.floor(caster.attack * 1.2);
+          targets.push({ unit: target, value: damage });
+          result = { type: 'damage', targets, message: `${caster.avatar} наносит ${skill.name}!` };
+        } else if (skillType === 'ultimate') {
+          // Hit all nearby enemies
+          const nearbyEnemies = enemies.filter(e => {
+            if (!e.position || !caster.position) return false;
+            return hexDistance(caster.position, e.position) <= 1 && !e.isDead;
+          });
+          nearbyEnemies.forEach(e => {
+            targets.push({ unit: e, value: Math.floor(caster.attack * 0.8) });
+          });
+          result = { type: 'area', targets, message: `${caster.avatar} активирует ${skill.name}!` };
+        }
+        break;
+        
+      case 'fire_mage':
+      case 'frost_mage':
+        if (target && targetPos) {
+          // Area magic damage
+          const areaTargets = enemies.filter(e => {
+            if (!e.position) return false;
+            return hexDistance(targetPos, e.position) <= 2 && !e.isDead;
+          });
+          const baseDamage = skillType === 'ultimate' ? Math.floor(caster.attack * 1.5) : Math.floor(caster.attack * 0.8);
+          areaTargets.forEach(t => {
+            targets.push({ unit: t, value: baseDamage });
+          });
+          result = { type: 'area', targets, message: `${caster.avatar} выпускает ${skill.name}!` };
+        }
+        break;
+        
+      case 'ranger':
+        if (target) {
+          const damage = skillType === 'ultimate' ? Math.floor(caster.attack * 1.3) : Math.floor(caster.attack * 1.1);
+          targets.push({ unit: target, value: damage });
+          result = { type: 'damage', targets, message: `${caster.avatar} выпускает ${skill.name}!` };
+        }
+        break;
+        
+      // Support skills
+      case 'light_priestess':
+        if (skillType === 'active') {
+          // Heal an ally
+          const allyTarget = allies.find(a => 
+            a.position?.q === targetPos.q && a.position?.r === targetPos.r && !a.isDead
+          );
+          if (allyTarget) {
+            targets.push({ unit: allyTarget, value: 40 });
+            result = { type: 'heal', targets, message: `${caster.avatar} исцеляет ${allyTarget.name}!` };
+          }
+        } else {
+          // Heal all allies
+          allies.filter(a => !a.isDead).forEach(a => {
+            targets.push({ unit: a, value: 30 });
+          });
+          result = { type: 'heal', targets, message: `${caster.avatar} активирует ${skill.name}!` };
+        }
+        break;
+        
+      case 'war_drummer':
+      case 'shaman':
+        if (skillType === 'active') {
+          // Buff allies
+          const nearbyAllies = allies.filter(a => {
+            if (!a.position || !caster.position) return false;
+            return hexDistance(caster.position, a.position) <= 3 && !a.isDead;
+          });
+          nearbyAllies.forEach(a => {
+            targets.push({ unit: a, value: 20 });
+          });
+          result = { type: 'buff', targets, message: `${caster.avatar} вдохновляет союзников!` };
+        } else if (target) {
+          targets.push({ unit: target, value: Math.floor(caster.attack * 1.5) });
+          result = { type: 'damage', targets, message: `${caster.avatar} обрушивает ${skill.name}!` };
+        }
+        break;
+        
+      case 'necromancer':
+        if (target) {
+          const damage = skillType === 'ultimate' ? Math.floor(caster.attack * 1.8) : Math.floor(caster.attack * 1.0);
+          targets.push({ unit: target, value: damage });
+          result = { type: 'damage', targets, message: `${caster.avatar} использует ${skill.name}!` };
+        }
+        break;
+        
+      default:
+        // Generic damage skill
+        if (target) {
+          const damage = Math.floor(caster.attack * (skillType === 'ultimate' ? 1.5 : 1.0));
+          targets.push({ unit: target, value: damage });
+          result = { type: 'damage', targets, message: `${caster.avatar} использует ${skill.name}!` };
+        }
+    }
+    
+    if (!result || targets.length === 0) return null;
+    
+    // Apply effects
+    const updateUnit = (units: BattleUnit[], unitId: string, updates: Partial<BattleUnit>) =>
+      units.map(u => u.id === unitId ? { ...u, ...updates } : u);
+    
+    // Deduct energy for ultimate
+    let casterEnergy = caster.currentEnergy;
+    if (skillType === 'ultimate') {
+      casterEnergy = Math.max(0, caster.currentEnergy - (skill.energyCost || 100));
+    }
+    
+    // Apply to each target
+    targets.forEach(({ unit, value }) => {
+      if (result!.type === 'damage' || result!.type === 'area') {
+        const newHealth = Math.max(0, unit.currentHealth - value);
+        const isDead = newHealth === 0;
+        const updates = { currentHealth: newHealth, isDead };
+        
+        if (unit.owner === 'player') {
+          set(s => ({ playerUnits: updateUnit(s.playerUnits, unit.id, updates) }));
+        } else {
+          set(s => ({ enemyUnits: updateUnit(s.enemyUnits, unit.id, updates) }));
+        }
+        set(s => ({ turnOrder: updateUnit(s.turnOrder, unit.id, updates) }));
+        
+        if (isDead) {
+          get().addBattleLog(`☠️ ${unit.name} повержен!`);
+        }
+      } else if (result!.type === 'heal') {
+        const newHealth = Math.min(unit.maxHealth, unit.currentHealth + value);
+        const updates = { currentHealth: newHealth };
+        
+        if (unit.owner === 'player') {
+          set(s => ({ playerUnits: updateUnit(s.playerUnits, unit.id, updates) }));
+        } else {
+          set(s => ({ enemyUnits: updateUnit(s.enemyUnits, unit.id, updates) }));
+        }
+        set(s => ({ turnOrder: updateUnit(s.turnOrder, unit.id, updates) }));
+      }
+    });
+    
+    // Update caster
+    const casterUpdates = { hasActed: true, currentEnergy: casterEnergy };
+    if (caster.owner === 'player') {
+      set(s => ({ playerUnits: updateUnit(s.playerUnits, caster.id, casterUpdates) }));
+    } else {
+      set(s => ({ enemyUnits: updateUnit(s.enemyUnits, caster.id, casterUpdates) }));
+    }
+    set(s => ({ 
+      turnOrder: updateUnit(s.turnOrder, caster.id, casterUpdates),
+      selectedUnit: s.selectedUnit?.id === caster.id ? { ...s.selectedUnit, ...casterUpdates } : s.selectedUnit,
+      skillMode: null,
+      skillRange: new Set<string>(),
+    }));
+    
+    get().addBattleLog(result.message);
+    
+    return result;
   },
   
   selectedHeroId: null,

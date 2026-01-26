@@ -20,10 +20,15 @@ export const BattleArena = () => {
     setSelectedUnit,
     moveUnit,
     attackUnit,
+    useSkill,
     endTurn,
     battleLog,
     hoveredUnit,
     setHoveredUnit,
+    skillMode,
+    setSkillMode,
+    skillRange,
+    setSkillRange,
   } = useGameStore();
 
   const [obstacles] = useState(() => generateObstacles(GRID_WIDTH, GRID_HEIGHT, 8));
@@ -46,13 +51,15 @@ export const BattleArena = () => {
     return new Set<string>();
   }, [selectedUnit, allUnits, obstacles, currentUnit]);
 
-  // Helper to convert hex to pixel for animations
+  // Helper to convert hex to pixel for animations (must match HexGrid)
   const hexToPixel = useCallback((q: number, r: number) => {
     const HEX_SIZE = 36;
     const HEX_WIDTH = Math.sqrt(3) * HEX_SIZE;
     const HEX_HEIGHT = 2 * HEX_SIZE;
-    const x = HEX_SIZE * Math.sqrt(3) * (q + r / 2) + HEX_WIDTH;
-    const y = HEX_SIZE * (3 / 2) * r + HEX_HEIGHT;
+    // Match HexGrid: offset rows for staggered alignment
+    const offset = r % 2 === 0 ? 0 : HEX_WIDTH / 2;
+    const x = q * HEX_WIDTH + offset + HEX_WIDTH;
+    const y = r * HEX_HEIGHT * 0.75 + HEX_HEIGHT;
     return { x, y };
   }, []);
 
@@ -215,6 +222,57 @@ export const BattleArena = () => {
     const key = `${q},${r}`;
     const clickedUnit = allUnits.find(u => u.position?.q === q && u.position?.r === r && !u.isDead);
     
+    // Handle skill targeting
+    if (skillMode && skillRange.has(key)) {
+      const targetPos = { q, r };
+      
+      // Show skill animation
+      if (currentUnit.position) {
+        const from = hexToPixel(currentUnit.position.q, currentUnit.position.r);
+        const to = hexToPixel(q, r);
+        const id = `skill-${popupIdRef.current++}`;
+        
+        // Choose skill emoji
+        const skillEmoji = skillMode === 'ultimate' ? '💫' : 
+          currentUnit.role === 'support' ? '✨' : 
+          currentUnit.attackType === 'magical' ? '🔮' : '⚡';
+        
+        setAttackAnimations(prev => [...prev, {
+          id,
+          fromX: from.x,
+          fromY: from.y,
+          toX: to.x,
+          toY: to.y,
+          type: 'ranged',
+          emoji: skillEmoji,
+        }]);
+        
+        setTimeout(() => {
+          setAttackAnimations(prev => prev.filter(a => a.id !== id));
+          
+          const result = useSkill(currentUnit, targetPos, skillMode);
+          if (result) {
+            // Show damage/heal popups for each target
+            result.targets.forEach((t, index) => {
+              setTimeout(() => {
+                if (t.unit.position) {
+                  showDamagePopup(t.unit.position, t.value, result.type === 'heal');
+                }
+              }, index * 100);
+            });
+          }
+        }, 400);
+      }
+      return;
+    }
+    
+    // Cancel skill mode on clicking elsewhere
+    if (skillMode) {
+      setSkillMode(null);
+      setSkillRange(new Set());
+      return;
+    }
+    
     // Attack enemy
     if (clickedUnit && clickedUnit.owner === 'enemy' && !currentUnit.hasActed && currentUnit.position) {
       const distance = hexDistance(currentUnit.position, { q, r });
@@ -241,7 +299,7 @@ export const BattleArena = () => {
     if (selectedUnit && !selectedUnit.hasMoved && movementRange.has(key) && currentUnit.id === selectedUnit.id) {
       moveUnit(selectedUnit, { q, r });
     }
-  }, [currentUnit, allUnits, selectedUnit, movementRange, moveUnit, attackUnit, setSelectedUnit, gameOver, showAttackAnimation, showDamagePopup]);
+  }, [currentUnit, allUnits, selectedUnit, movementRange, moveUnit, attackUnit, setSelectedUnit, gameOver, showAttackAnimation, showDamagePopup, skillMode, skillRange, setSkillMode, setSkillRange, useSkill, hexToPixel]);
 
   const handleHexHover = useCallback((q: number, r: number, unit: BattleUnit | null) => {
     if (unit && unit.owner === 'enemy' && currentUnit && currentUnit.owner === 'player' && !currentUnit.hasActed) {
@@ -253,9 +311,60 @@ export const BattleArena = () => {
 
   const handleEndTurn = () => endTurn();
 
-  const handleUseSkill = (skillType: 'active' | 'ultimate') => {
-    console.log('Use skill:', skillType);
-  };
+  const handleUseSkill = useCallback((skillType: 'active' | 'ultimate') => {
+    if (!currentUnit || currentUnit.hasActed) return;
+    
+    // Check energy for ultimate
+    if (skillType === 'ultimate') {
+      const energyCost = currentUnit.skills.ultimate.energyCost || 100;
+      if (currentUnit.currentEnergy < energyCost) return;
+    }
+    
+    // Toggle skill mode
+    if (skillMode === skillType) {
+      setSkillMode(null);
+      setSkillRange(new Set());
+      return;
+    }
+    
+    setSkillMode(skillType);
+    
+    // Calculate skill range based on hero type
+    const newRange = new Set<string>();
+    if (currentUnit.position) {
+      const isSupport = currentUnit.role === 'support';
+      const isSelfBuff = ['ironclad', 'stone_giant', 'paladin', 'berserker'].includes(currentUnit.id);
+      
+      // Different range logic for different skills
+      if (isSupport && skillType === 'active' && currentUnit.id === 'light_priestess') {
+        // Healer can target allies
+        playerUnits.filter(u => !u.isDead && u.position).forEach(u => {
+          if (u.position) {
+            const dist = hexDistance(currentUnit.position!, u.position);
+            if (dist <= 3) {
+              newRange.add(`${u.position.q},${u.position.r}`);
+            }
+          }
+        });
+      } else if (isSelfBuff && skillType === 'ultimate') {
+        // Self-targeting
+        newRange.add(`${currentUnit.position.q},${currentUnit.position.r}`);
+      } else {
+        // Default: target enemies
+        const skillRange = skillType === 'ultimate' ? 6 : (currentUnit.attackRange === 'ranged' ? 5 : 2);
+        enemyUnits.filter(u => !u.isDead && u.position).forEach(u => {
+          if (u.position) {
+            const dist = hexDistance(currentUnit.position!, u.position);
+            if (dist <= skillRange) {
+              newRange.add(`${u.position.q},${u.position.r}`);
+            }
+          }
+        });
+      }
+    }
+    
+    setSkillRange(newRange);
+  }, [currentUnit, skillMode, setSkillMode, setSkillRange, playerUnits, enemyUnits]);
 
   if (gameOver) {
     return (
@@ -347,6 +456,8 @@ export const BattleArena = () => {
               onHexClick={handleHexClick}
               onHexHover={handleHexHover}
               movementRange={movementRange}
+              skillRange={skillRange}
+              skillMode={skillMode}
               hoveredEnemy={hoveredUnit}
               damagePopups={damagePopups}
               attackAnimations={attackAnimations}
@@ -366,7 +477,7 @@ export const BattleArena = () => {
         {/* Right sidebar */}
         <div className="w-56 flex-shrink-0 bg-secondary/20 border-l border-border p-2 overflow-y-auto flex flex-col gap-3">
           {currentUnit && currentUnit.owner === 'player' && (
-            <SkillPanel unit={currentUnit} onUseSkill={handleUseSkill} />
+            <SkillPanel unit={currentUnit} onUseSkill={handleUseSkill} skillMode={skillMode} />
           )}
           
           <div>
