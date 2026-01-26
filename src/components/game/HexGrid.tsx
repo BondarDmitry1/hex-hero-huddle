@@ -30,6 +30,8 @@ interface HexGridProps {
   onHexClick: (q: number, r: number) => void;
   onHexHover: (q: number, r: number, unit: BattleUnit | null) => void;
   movementRange?: Set<string>;
+  skillRange?: Set<string>;
+  skillMode?: 'active' | 'ultimate' | null;
   hoveredEnemy: BattleUnit | null;
   damagePopups: DamagePopup[];
   attackAnimations: AttackAnimation[];
@@ -45,6 +47,8 @@ export const HexGrid = ({
   onHexClick,
   onHexHover,
   movementRange = new Set(),
+  skillRange = new Set(),
+  skillMode = null,
   hoveredEnemy,
   damagePopups = [],
   attackAnimations = [],
@@ -81,13 +85,14 @@ export const HexGrid = ({
         const { x, y } = hexToPixel(q, r);
         const isObstacle = obstacles.has(key);
         const isMovement = movementRange.has(key);
+        const isSkillTarget = skillRange.has(key);
         const unit = units.find(u => u.position?.q === q && u.position?.r === r && !u.isDead);
         const isSelected = selectedUnit?.position?.q === q && selectedUnit?.position?.r === r;
         const isCurrent = currentUnit?.position?.q === q && currentUnit?.position?.r === r;
 
         let isInAttackRange = false;
         let attackDistancePenalty = false;
-        if (unit && currentUnit && unit.owner !== currentUnit.owner && currentUnit.position && !currentUnit.hasActed) {
+        if (unit && currentUnit && unit.owner !== currentUnit.owner && currentUnit.position && !currentUnit.hasActed && !skillMode) {
           const distance = hexDistance(currentUnit.position, { q, r });
           if (currentUnit.attackRange === 'melee') {
             isInAttackRange = distance <= currentUnit.range;
@@ -98,12 +103,12 @@ export const HexGrid = ({
         }
 
         result.push({
-          q, r, x, y, key, isObstacle, isMovement, unit, isSelected, isCurrent, isInAttackRange, attackDistancePenalty,
+          q, r, x, y, key, isObstacle, isMovement, isSkillTarget, unit, isSelected, isCurrent, isInAttackRange, attackDistancePenalty,
         });
       }
     }
     return result;
-  }, [width, height, obstacles, units, selectedUnit, currentUnit, movementRange, hexToPixel]);
+  }, [width, height, obstacles, units, selectedUnit, currentUnit, movementRange, skillRange, skillMode, hexToPixel]);
 
   const svgWidth = (width + 0.5) * HEX_WIDTH + HEX_WIDTH;
   const svgHeight = height * HEX_HEIGHT * 0.75 + HEX_HEIGHT;
@@ -132,13 +137,13 @@ export const HexGrid = ({
       </defs>
 
       {/* Grid hexes */}
-      {hexes.map(({ q, r, x, y, key, isObstacle, isMovement, unit, isSelected, isCurrent, isInAttackRange, attackDistancePenalty }) => (
+      {hexes.map(({ q, r, x, y, key, isObstacle, isMovement, isSkillTarget, unit, isSelected, isCurrent, isInAttackRange, attackDistancePenalty }) => (
         <g 
           key={key} 
           onClick={() => onHexClick(q, r)}
           onMouseEnter={() => onHexHover(q, r, unit || null)}
           onMouseLeave={() => onHexHover(q, r, null)}
-          style={{ cursor: (isMovement || isInAttackRange) ? 'pointer' : 'default' }}
+          style={{ cursor: (isMovement || isInAttackRange || isSkillTarget) ? 'pointer' : 'default' }}
         >
           <polygon
             points={hexPoints(x, y)}
@@ -147,8 +152,9 @@ export const HexGrid = ({
               isObstacle && 'hex-obstacle',
               isSelected && 'hex-selected',
               isCurrent && !isSelected && 'hex-current',
-              isMovement && !unit && 'hex-movement',
-              isInAttackRange && hoveredEnemy?.id === unit?.id && 'hex-attack'
+              isMovement && !unit && !skillMode && 'hex-movement',
+              isInAttackRange && hoveredEnemy?.id === unit?.id && 'hex-attack',
+              isSkillTarget && (skillMode === 'ultimate' ? 'hex-ultimate' : 'hex-skill')
             )}
           />
           
@@ -349,6 +355,31 @@ export const generateObstacles = (width: number, height: number, count: number):
   return obstacles;
 };
 
+// Get neighbors for offset grid (staggered rows)
+const getNeighbors = (q: number, r: number): { q: number; r: number }[] => {
+  // For even rows (r % 2 === 0): different neighbor offsets than odd rows
+  const isEvenRow = r % 2 === 0;
+  if (isEvenRow) {
+    return [
+      { q: q + 1, r: r },     // right
+      { q: q - 1, r: r },     // left
+      { q: q, r: r - 1 },     // top-left
+      { q: q + 1, r: r - 1 }, // top-right
+      { q: q, r: r + 1 },     // bottom-left
+      { q: q + 1, r: r + 1 }, // bottom-right
+    ];
+  } else {
+    return [
+      { q: q + 1, r: r },     // right
+      { q: q - 1, r: r },     // left
+      { q: q - 1, r: r - 1 }, // top-left
+      { q: q, r: r - 1 },     // top-right
+      { q: q - 1, r: r + 1 }, // bottom-left
+      { q: q, r: r + 1 },     // bottom-right
+    ];
+  }
+};
+
 // Calculate movement range
 export const getMovementRange = (
   unit: BattleUnit,
@@ -363,12 +394,6 @@ export const getMovementRange = (
   const visited = new Map<string, number>();
   const queue: { q: number; r: number; distance: number }[] = [
     { q: unit.position.q, r: unit.position.r, distance: 0 },
-  ];
-  
-  const directions = [
-    { q: 1, r: 0 }, { q: -1, r: 0 },
-    { q: 0, r: 1 }, { q: 0, r: -1 },
-    { q: 1, r: -1 }, { q: -1, r: 1 },
   ];
   
   while (queue.length > 0) {
@@ -388,13 +413,12 @@ export const getMovementRange = (
     }
     
     if (current.distance < unit.speed) {
-      for (const dir of directions) {
-        const nq = current.q + dir.q;
-        const nr = current.r + dir.r;
-        const nKey = `${nq},${nr}`;
+      const neighbors = getNeighbors(current.q, current.r);
+      for (const n of neighbors) {
+        const nKey = `${n.q},${n.r}`;
         
-        if (nq >= 0 && nq < width && nr >= 0 && nr < height && !obstacles.has(nKey)) {
-          queue.push({ q: nq, r: nr, distance: current.distance + 1 });
+        if (n.q >= 0 && n.q < width && n.r >= 0 && n.r < height && !obstacles.has(nKey)) {
+          queue.push({ q: n.q, r: n.r, distance: current.distance + 1 });
         }
       }
     }
