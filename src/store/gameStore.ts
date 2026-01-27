@@ -62,8 +62,9 @@ interface GameState {
   setSelectedHeroId: (id: string | null) => void;
 }
 
-// Convert offset coordinates to cube coordinates for accurate distance
+// Convert offset coordinates to cube coordinates for accurate distance (odd-r layout)
 const offsetToCube = (q: number, r: number) => {
+  // Для odd-r offset: нечётные ряды сдвинуты вправо
   const x = q - Math.floor(r / 2);
   const z = r;
   const y = -x - z;
