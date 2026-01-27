@@ -1,5 +1,6 @@
 import { Hero } from '@/data/heroes';
 import { cn } from '@/lib/utils';
+import { Swords, Sparkles } from 'lucide-react';
 
 interface HeroCardProps {
   hero: Hero;
@@ -83,7 +84,11 @@ export const HeroCard = ({ hero, onClick, selected, disabled, compact }: HeroCar
             <span>{hero.health}</span>
           </div>
           <div className="flex items-center gap-1">
-            <span className="text-destructive">⚔️</span>
+            {hero.attackType === 'physical' ? (
+              <Swords className="w-3 h-3 text-orange-400" />
+            ) : (
+              <Sparkles className="w-3 h-3 text-violet-400" />
+            )}
             <span>{hero.attack}</span>
           </div>
           <div className="flex items-center gap-1">

@@ -1,6 +1,6 @@
 import { Hero, calculateDamageReduction } from '@/data/heroes';
 import { cn } from '@/lib/utils';
-import { X, Heart, Swords, Shield, Zap, Move, Target, Crosshair } from 'lucide-react';
+import { X, Heart, Swords, Shield, Zap, Move, Target, Crosshair, Sparkles } from 'lucide-react';
 
 interface HeroDetailProps {
   hero: Hero;
@@ -56,7 +56,10 @@ export const HeroDetail = ({ hero, onClose }: HeroDetailProps) => {
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
             <StatBox icon={<Heart className="w-5 h-5 text-health" />} label="Здоровье" value={hero.health} />
             <StatBox 
-              icon={<Swords className="w-5 h-5 text-destructive" />} 
+              icon={hero.attackType === 'physical' 
+                ? <Swords className="w-5 h-5 text-orange-400" /> 
+                : <Sparkles className="w-5 h-5 text-violet-400" />
+              } 
               label={`Атака (${attackTypeLabel})`} 
               value={hero.attack} 
             />
