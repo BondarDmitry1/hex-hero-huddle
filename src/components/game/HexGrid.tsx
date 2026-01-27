@@ -92,18 +92,25 @@ export const HexGrid = ({
 
         let isInAttackRange = false;
         let attackDistancePenalty = false;
+        let forcedMeleeAttack = false;
         if (unit && currentUnit && unit.owner !== currentUnit.owner && currentUnit.position && !currentUnit.hasActed && !skillMode) {
           const distance = hexDistance(currentUnit.position, { q, r });
           if (currentUnit.attackRange === 'melee') {
             isInAttackRange = distance <= currentUnit.range;
           } else {
+            // Стрелки всегда могут атаковать
             isInAttackRange = true;
-            attackDistancePenalty = distance > 5;
+            // Если враг вплотную - ближний бой со штрафом 66%
+            if (distance === 1) {
+              forcedMeleeAttack = true;
+            } else if (distance > 5) {
+              attackDistancePenalty = true;
+            }
           }
         }
 
         result.push({
-          q, r, x, y, key, isObstacle, isMovement, isSkillTarget, unit, isSelected, isCurrent, isInAttackRange, attackDistancePenalty,
+          q, r, x, y, key, isObstacle, isMovement, isSkillTarget, unit, isSelected, isCurrent, isInAttackRange, attackDistancePenalty, forcedMeleeAttack,
         });
       }
     }
@@ -137,7 +144,7 @@ export const HexGrid = ({
       </defs>
 
       {/* Grid hexes */}
-      {hexes.map(({ q, r, x, y, key, isObstacle, isMovement, isSkillTarget, unit, isSelected, isCurrent, isInAttackRange, attackDistancePenalty }) => (
+      {hexes.map(({ q, r, x, y, key, isObstacle, isMovement, isSkillTarget, unit, isSelected, isCurrent, isInAttackRange, attackDistancePenalty, forcedMeleeAttack }) => (
         <g 
           key={key} 
           onClick={() => onHexClick(q, r)}
@@ -197,7 +204,7 @@ export const HexGrid = ({
               
               {/* Attack indicator */}
               {isInAttackRange && hoveredEnemy?.id === unit.id && (
-                <g className="animate-bounce">
+                <g style={{ animation: 'subtle-pulse 1s ease-in-out infinite' }}>
                   <circle
                     cx={x + HEX_SIZE * 0.6}
                     cy={y - HEX_SIZE * 0.6}
@@ -211,7 +218,7 @@ export const HexGrid = ({
                     textAnchor="middle"
                     className="text-sm fill-white font-bold select-none pointer-events-none"
                   >
-                    {attackDistancePenalty ? '½' : '⚔'}
+                    {forcedMeleeAttack ? '⅓' : attackDistancePenalty ? '½' : '⚔'}
                   </text>
                 </g>
               )}

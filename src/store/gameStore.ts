@@ -239,8 +239,17 @@ export const useGameStore = create<GameState>((set, get) => ({
       target.magicalDefense
     );
     
-    if (attacker.attackRange === 'ranged' && distance > 5) {
-      damage = Math.floor(damage / 2);
+    // Стрелки: если враг вплотную (distance === 1), атакуют как ближний бой с уроном /3
+    // Если враг далеко (distance > 5), урон /2
+    let forcedMelee = false;
+    if (attacker.attackRange === 'ranged') {
+      if (distance === 1) {
+        // Враг вплотную - стрелок атакует в ближнем бою с уроном x1/3
+        damage = Math.floor(damage / 3);
+        forcedMelee = true;
+      } else if (distance > 5) {
+        damage = Math.floor(damage / 2);
+      }
     }
     
     const isCrit = Math.random() < 0.1;
@@ -283,7 +292,14 @@ export const useGameStore = create<GameState>((set, get) => ({
     });
     
     const critText = isCrit ? ' 💥КРИТ!' : '';
-    const distanceText = attacker.attackRange === 'ranged' && distance > 5 ? ' (дальность -50%)' : '';
+    let distanceText = '';
+    if (attacker.attackRange === 'ranged') {
+      if (forcedMelee) {
+        distanceText = ' (ближний бой -66%)';
+      } else if (distance > 5) {
+        distanceText = ' (дальность -50%)';
+      }
+    }
     const killText = isDead ? ` ☠️ ${target.name} повержен!` : '';
     get().addBattleLog(`${attacker.avatar} → ${target.avatar}: ${damage} урона${critText}${distanceText}${killText}`);
     
