@@ -355,11 +355,16 @@ export const generateObstacles = (width: number, height: number, count: number):
   return obstacles;
 };
 
-// Get neighbors for offset grid (staggered rows)
+// Get neighbors for offset grid (odd-r offset layout)
+// В odd-r layout нечётные ряды сдвинуты вправо
 const getNeighbors = (q: number, r: number): { q: number; r: number }[] => {
-  // For even rows (r % 2 === 0): different neighbor offsets than odd rows
-  const isEvenRow = r % 2 === 0;
-  if (isEvenRow) {
+  // Для odd-r offset grid:
+  // - Чётные ряды (r % 2 === 0): сдвига нет
+  // - Нечётные ряды (r % 2 === 1): сдвиг вправо на половину гекса
+  const isOddRow = r % 2 === 1;
+  
+  if (isOddRow) {
+    // Нечётный ряд (сдвинут вправо)
     return [
       { q: q + 1, r: r },     // right
       { q: q - 1, r: r },     // left
@@ -369,6 +374,7 @@ const getNeighbors = (q: number, r: number): { q: number; r: number }[] => {
       { q: q + 1, r: r + 1 }, // bottom-right
     ];
   } else {
+    // Чётный ряд (без сдвига)
     return [
       { q: q + 1, r: r },     // right
       { q: q - 1, r: r },     // left
