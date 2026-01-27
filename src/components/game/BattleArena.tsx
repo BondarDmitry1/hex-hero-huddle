@@ -276,6 +276,9 @@ export const BattleArena = () => {
     // Attack enemy
     if (clickedUnit && clickedUnit.owner === 'enemy' && !currentUnit.hasActed && currentUnit.position) {
       const distance = hexDistance(currentUnit.position, { q, r });
+      
+      // Для мили - проверяем дальность
+      // Для стрелков - всегда можно атаковать (урон изменится в attackUnit)
       const canAttack = currentUnit.attackRange === 'melee' 
         ? distance <= currentUnit.range 
         : true;

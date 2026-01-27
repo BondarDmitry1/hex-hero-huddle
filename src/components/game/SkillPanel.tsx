@@ -30,7 +30,13 @@ export const SkillPanel = ({ unit, onUseSkill, skillMode }: SkillPanelProps) => 
       <div className="grid grid-cols-3 gap-2 mb-4 text-xs">
         <div className="bg-muted rounded p-2 text-center">
           <p className="text-muted-foreground">Атака</p>
-          <p className="font-semibold text-destructive">{unit.attack}</p>
+          <p className={cn(
+            "font-semibold flex items-center justify-center gap-1",
+            unit.attackType === 'physical' ? 'text-orange-400' : 'text-violet-400'
+          )}>
+            {unit.attackType === 'physical' ? '⚔️' : '✨'}
+            {unit.attack}
+          </p>
         </div>
         <div className="bg-muted rounded p-2 text-center">
           <p className="text-muted-foreground">Дальность</p>
