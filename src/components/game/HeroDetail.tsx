@@ -72,12 +72,12 @@ export const HeroDetail = ({ hero, onClose }: HeroDetailProps) => {
               value={`${hero.range} ${hero.range === 1 ? 'гекс' : 'гексов'}`} 
             />
             <StatBox 
-              icon={<Shield className="w-5 h-5 text-tank" />} 
+              icon={<Shield className="w-5 h-5 text-orange-400" />} 
               label="Физ. Защита" 
               value={`${hero.physicalDefense} (${calculateDamageReduction(hero.physicalDefense)}%)`} 
             />
             <StatBox 
-              icon={<Shield className="w-5 h-5 text-mana" />} 
+              icon={<Shield className="w-5 h-5 text-violet-400" />} 
               label="Маг. Защита" 
               value={`${hero.magicalDefense} (${calculateDamageReduction(hero.magicalDefense)}%)`} 
             />
