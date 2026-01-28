@@ -239,15 +239,28 @@ export const useGameStore = create<GameState>((set, get) => ({
       target.magicalDefense
     );
     
-    // Стрелки: если враг вплотную (distance === 1), атакуют как ближний бой с уроном /3
-    // Если враг далеко (distance > 5), урон /2
+    // Стрелки: если враг вплотную (distance === 1), урон снижается втрое
+    // Если враг далеко (distance > 5), урон снижается вдвое
     let forcedMelee = false;
     if (attacker.attackRange === 'ranged') {
-      if (distance === 1) {
-        // Враг вплотную - стрелок атакует в ближнем бою с уроном x1/3
-        damage = Math.floor(damage / 3);
-        forcedMelee = true;
+      // Проверяем, заблокирован ли стрелок (есть враг вплотную)
+      const allEnemyUnits = attacker.owner === 'player' ? state.enemyUnits : state.playerUnits;
+      const isBlocked = allEnemyUnits.some(e => {
+        if (!e.position || e.isDead) return false;
+        return hexDistance(attacker.position!, e.position) === 1;
+      });
+      
+      if (isBlocked) {
+        // Стрелок заблокирован - может атаковать только вплотную с уроном x1/3
+        if (distance === 1) {
+          damage = Math.floor(damage / 3);
+          forcedMelee = true;
+        } else {
+          // Не может атаковать на дистанции, если заблокирован
+          return { damage: 0, isCrit: false };
+        }
       } else if (distance > 5) {
+        // Дальняя атака со штрафом
         damage = Math.floor(damage / 2);
       }
     }
