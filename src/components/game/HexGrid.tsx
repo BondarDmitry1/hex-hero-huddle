@@ -8,6 +8,7 @@ interface DamagePopup {
   y: number;
   damage: number;
   isCrit: boolean;
+  isHealing?: boolean;
 }
 
 interface AttackAnimation {
@@ -18,6 +19,11 @@ interface AttackAnimation {
   toY: number;
   type: 'melee' | 'ranged';
   emoji: string;
+}
+
+interface MeleeShakeUnit {
+  id: string;
+  unitId: string;
 }
 
 interface HexGridProps {
@@ -35,6 +41,8 @@ interface HexGridProps {
   hoveredEnemy: BattleUnit | null;
   damagePopups: DamagePopup[];
   attackAnimations: AttackAnimation[];
+  meleeShakeUnits?: MeleeShakeUnit[];
+  isRangedBlocked?: boolean;
 }
 
 export const HexGrid = ({
@@ -52,6 +60,8 @@ export const HexGrid = ({
   hoveredEnemy,
   damagePopups = [],
   attackAnimations = [],
+  meleeShakeUnits = [],
+  isRangedBlocked = false,
 }: HexGridProps) => {
   // Calculate hex size based on grid dimensions to make it visually square
   const HEX_SIZE = 36;
@@ -98,13 +108,18 @@ export const HexGrid = ({
           if (currentUnit.attackRange === 'melee') {
             isInAttackRange = distance <= currentUnit.range;
           } else {
-            // Стрелки всегда могут атаковать
-            isInAttackRange = true;
-            // Если враг вплотную - ближний бой со штрафом 66%
-            if (distance === 1) {
-              forcedMeleeAttack = true;
-            } else if (distance > 5) {
-              attackDistancePenalty = true;
+            // Стрелок заблокирован - может атаковать только вплотную
+            if (isRangedBlocked) {
+              isInAttackRange = distance === 1;
+              if (distance === 1) {
+                forcedMeleeAttack = true;
+              }
+            } else {
+              // Стрелок свободен - дальняя атака
+              isInAttackRange = true;
+              if (distance > 5) {
+                attackDistancePenalty = true;
+              }
             }
           }
         }
@@ -115,7 +130,7 @@ export const HexGrid = ({
       }
     }
     return result;
-  }, [width, height, obstacles, units, selectedUnit, currentUnit, movementRange, skillRange, skillMode, hexToPixel]);
+  }, [width, height, obstacles, units, selectedUnit, currentUnit, movementRange, skillRange, skillMode, hexToPixel, isRangedBlocked]);
 
   const svgWidth = (width + 0.5) * HEX_WIDTH + HEX_WIDTH;
   const svgHeight = height * HEX_HEIGHT * 0.75 + HEX_HEIGHT;
@@ -169,7 +184,7 @@ export const HexGrid = ({
           {unit && (
             <g className={cn(
               'transition-transform duration-200',
-              isInAttackRange && hoveredEnemy?.id === unit.id && 'animate-pulse'
+              meleeShakeUnits.some(s => s.unitId === unit.id) && 'melee-shake'
             )}>
               {/* Unit shadow */}
               <ellipse
@@ -202,14 +217,16 @@ export const HexGrid = ({
                 {unit.avatar}
               </text>
               
-              {/* Attack indicator */}
+              {/* Attack indicator - static, type-based */}
               {isInAttackRange && hoveredEnemy?.id === unit.id && (
-                <g style={{ animation: 'subtle-pulse 1s ease-in-out infinite' }}>
+                <g>
                   <circle
                     cx={x + HEX_SIZE * 0.6}
                     cy={y - HEX_SIZE * 0.6}
-                    r={12}
-                    className="fill-destructive"
+                    r={14}
+                    className={cn(
+                      forcedMeleeAttack ? "fill-orange-600" : "fill-destructive"
+                    )}
                     filter="url(#glow)"
                   />
                   <text
@@ -218,7 +235,7 @@ export const HexGrid = ({
                     textAnchor="middle"
                     className="text-sm fill-white font-bold select-none pointer-events-none"
                   >
-                    {forcedMeleeAttack ? '⅓' : attackDistancePenalty ? '½' : '⚔'}
+                    {forcedMeleeAttack ? '⚔' : attackDistancePenalty ? '🏹½' : currentUnit?.attackRange === 'melee' ? '⚔' : '🏹'}
                   </text>
                 </g>
               )}
@@ -255,7 +272,7 @@ export const HexGrid = ({
             </g>
           )}
           
-          {/* Obstacle display */}
+          {/* Obstacle display - diverse types */}
           {isObstacle && (
             <text
               x={x}
@@ -263,69 +280,90 @@ export const HexGrid = ({
               textAnchor="middle"
               className="text-lg select-none pointer-events-none"
             >
-              🪨
+              {(() => {
+                const hash = (q * 7 + r * 13) % 5;
+                const obstacles = ['🪨', '🌲', '🏔️', '🌳', '⛰️'];
+                return obstacles[hash];
+              })()}
             </text>
           )}
         </g>
       ))}
       
-      {/* Attack animations */}
-      {attackAnimations.map((anim) => (
-        <g key={anim.id} className="attack-projectile">
-          {anim.type === 'ranged' ? (
-            <>
-              {/* Trail */}
-              <line
-                x1={anim.fromX}
-                y1={anim.fromY}
-                x2={anim.toX}
-                y2={anim.toY}
-                stroke="url(#attackTrail)"
-                strokeWidth="4"
-                className="animate-fade-in"
-              />
-              {/* Projectile */}
-              <text
-                x={anim.toX}
-                y={anim.toY}
-                textAnchor="middle"
-                className="text-2xl animate-scale-in"
-                filter="url(#glow)"
-              >
-                {anim.emoji}
-              </text>
-            </>
-          ) : (
-            /* Melee slash effect */
-            <g>
-              <text
-                x={anim.toX}
-                y={anim.toY}
-                textAnchor="middle"
-                className="text-3xl animate-scale-in"
-                filter="url(#glow)"
-              >
-                💥
-              </text>
-            </g>
-          )}
-        </g>
-      ))}
+      {/* Attack animations - smooth projectile */}
+      {attackAnimations.map((anim) => {
+        const dx = anim.toX - anim.fromX;
+        const dy = anim.toY - anim.fromY;
+        const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+        
+        return (
+          <g key={anim.id}>
+            {anim.type === 'ranged' ? (
+              <>
+                {/* Smooth trail */}
+                <line
+                  x1={anim.fromX}
+                  y1={anim.fromY}
+                  x2={anim.toX}
+                  y2={anim.toY}
+                  stroke="url(#attackTrail)"
+                  strokeWidth="3"
+                  className="projectile-trail"
+                  strokeLinecap="round"
+                />
+                {/* Projectile with direction */}
+                <g className="projectile-move" style={{ 
+                  '--start-x': `${anim.fromX}px`, 
+                  '--start-y': `${anim.fromY}px`,
+                  '--end-x': `${anim.toX}px`,
+                  '--end-y': `${anim.toY}px`,
+                } as React.CSSProperties}>
+                  <text
+                    x={anim.toX}
+                    y={anim.toY}
+                    textAnchor="middle"
+                    className="text-2xl"
+                    filter="url(#glow)"
+                  >
+                    {anim.emoji}
+                  </text>
+                </g>
+              </>
+            ) : (
+              <g className="melee-impact">
+                <text
+                  x={anim.toX}
+                  y={anim.toY}
+                  textAnchor="middle"
+                  className="text-3xl"
+                  filter="url(#glow)"
+                >
+                  💥
+                </text>
+              </g>
+            )}
+          </g>
+        );
+      })}
       
-      {/* Damage popups */}
+      {/* Damage/Healing popups - smooth fly up from center */}
       {damagePopups.map((popup) => (
-        <g key={popup.id} className="damage-popup">
+        <g key={popup.id} className="damage-popup-smooth">
           <text
             x={popup.x}
             y={popup.y}
             textAnchor="middle"
             className={cn(
               'font-display font-bold select-none pointer-events-none',
-              popup.isCrit ? 'text-2xl fill-amber-400' : 'text-xl fill-destructive'
+              popup.isHealing 
+                ? 'text-xl fill-green-400' 
+                : popup.isCrit 
+                  ? 'text-2xl fill-amber-400' 
+                  : 'text-xl fill-destructive'
             )}
             filter="url(#glow)"
           >
-            {popup.isCrit ? `💥${popup.damage}` : `-${popup.damage}`}
+            {popup.isHealing ? `+${popup.damage}` : popup.isCrit ? `💥${popup.damage}` : `-${popup.damage}`}
           </text>
         </g>
       ))}
@@ -440,4 +478,4 @@ export const getMovementRange = (
   return range;
 };
 
-export type { DamagePopup, AttackAnimation };
+export type { DamagePopup, AttackAnimation, MeleeShakeUnit };

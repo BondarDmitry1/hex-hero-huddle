@@ -27,7 +27,7 @@ export const SkillPanel = ({ unit, onUseSkill, skillMode }: SkillPanelProps) => 
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-2 mb-4 text-xs">
+      <div className="grid grid-cols-2 gap-2 mb-4 text-xs">
         <div className="bg-muted rounded p-2 text-center">
           <p className="text-muted-foreground">Атака</p>
           <p className={cn(
@@ -39,8 +39,15 @@ export const SkillPanel = ({ unit, onUseSkill, skillMode }: SkillPanelProps) => 
           </p>
         </div>
         <div className="bg-muted rounded p-2 text-center">
+          <p className="text-muted-foreground">Защита</p>
+          <p className="font-semibold flex items-center justify-center gap-1">
+            <span className="text-orange-400">🛡️{unit.physicalDefense}</span>
+            <span className="text-violet-400">✨{unit.magicalDefense}</span>
+          </p>
+        </div>
+        <div className="bg-muted rounded p-2 text-center">
           <p className="text-muted-foreground">Дальность</p>
-          <p className="font-semibold">{unit.attackRange === 'melee' ? '⚔️ 1' : `🎯 ${unit.range}`}</p>
+          <p className="font-semibold">{unit.attackRange === 'melee' ? '⚔️ 1' : `🏹 ${unit.range}`}</p>
         </div>
         <div className="bg-muted rounded p-2 text-center">
           <p className="text-muted-foreground">Скорость</p>

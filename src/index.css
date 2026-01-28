@@ -200,15 +200,24 @@
     50% { opacity: 1; }
   }
 
-  @keyframes subtle-pulse {
-    0%, 100% { 
-      transform: translateY(0) scale(1);
-      opacity: 0.9;
-    }
-    50% { 
-      transform: translateY(-2px) scale(1.05);
-      opacity: 1;
-    }
+  .melee-shake {
+    animation: melee-shake 0.3s ease-out;
+  }
+
+  .melee-impact {
+    animation: melee-impact 0.4s ease-out forwards;
+  }
+
+  .projectile-trail {
+    animation: trail-fade 0.35s ease-out forwards;
+  }
+
+  .projectile-move {
+    animation: projectile-smooth 0.35s cubic-bezier(0.25, 0.1, 0.25, 1) forwards;
+  }
+
+  .damage-popup-smooth {
+    animation: damage-smooth 1s ease-out forwards;
   }
 
   .stat-bar {
@@ -284,6 +293,51 @@
 
   .buff-effect {
     animation: buff-pulse 0.5s ease-out forwards;
+  }
+}
+
+@keyframes melee-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-3px) rotate(-2deg); }
+  40% { transform: translateX(3px) rotate(2deg); }
+  60% { transform: translateX(-2px) rotate(-1deg); }
+  80% { transform: translateX(2px) rotate(1deg); }
+}
+
+@keyframes melee-impact {
+  0% { opacity: 0; transform: scale(0.3); }
+  50% { opacity: 1; transform: scale(1.4); }
+  100% { opacity: 0.8; transform: scale(1); }
+}
+
+@keyframes trail-fade {
+  0% { opacity: 0; stroke-dasharray: 0, 100; }
+  30% { opacity: 1; stroke-dasharray: 100, 0; }
+  100% { opacity: 0.7; stroke-dasharray: 100, 0; }
+}
+
+@keyframes projectile-smooth {
+  0% { opacity: 0; transform: scale(0.5); }
+  40% { opacity: 1; transform: scale(1.1); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes damage-smooth {
+  0% {
+    opacity: 0;
+    transform: translateY(0) scale(0.5);
+  }
+  15% {
+    opacity: 1;
+    transform: translateY(-8px) scale(1.2);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-25px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-50px) scale(0.8);
   }
 }
 
