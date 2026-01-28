@@ -1,6 +1,6 @@
 import { Hero } from '@/data/heroes';
 import { cn } from '@/lib/utils';
-import { Swords, Sparkles } from 'lucide-react';
+import { Swords, Sparkles, Shield } from 'lucide-react';
 
 interface HeroCardProps {
   hero: Hero;
@@ -92,8 +92,10 @@ export const HeroCard = ({ hero, onClick, selected, disabled, compact }: HeroCar
             <span>{hero.attack}</span>
           </div>
           <div className="flex items-center gap-1">
-            <span className="text-muted-foreground">🛡️</span>
-            <span>{hero.physicalDefense}/{hero.magicalDefense}</span>
+            <Shield className="w-3 h-3 text-orange-400" />
+            <span>{hero.physicalDefense}</span>
+            <Shield className="w-3 h-3 text-violet-400 ml-1" />
+            <span>{hero.magicalDefense}</span>
           </div>
           <div className="flex items-center gap-1">
             <span className="text-primary">⚡</span>

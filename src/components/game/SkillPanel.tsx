@@ -1,6 +1,6 @@
 import { BattleUnit, SkillMode } from '@/store/gameStore';
 import { cn } from '@/lib/utils';
-import { Zap, Target, X } from 'lucide-react';
+import { Zap, Target, X, Shield } from 'lucide-react';
 
 interface SkillPanelProps {
   unit: BattleUnit;
@@ -41,8 +41,10 @@ export const SkillPanel = ({ unit, onUseSkill, skillMode }: SkillPanelProps) => 
         <div className="bg-muted rounded p-2 text-center">
           <p className="text-muted-foreground">Защита</p>
           <p className="font-semibold flex items-center justify-center gap-1">
-            <span className="text-orange-400">🛡️{unit.physicalDefense}</span>
-            <span className="text-violet-400">✨{unit.magicalDefense}</span>
+            <Shield className="w-3 h-3 text-orange-400" />
+            <span className="text-orange-400">{unit.physicalDefense}</span>
+            <Shield className="w-3 h-3 text-violet-400 ml-1" />
+            <span className="text-violet-400">{unit.magicalDefense}</span>
           </p>
         </div>
         <div className="bg-muted rounded p-2 text-center">
