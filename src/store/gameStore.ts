@@ -240,8 +240,10 @@ export const useGameStore = create<GameState>((set, get) => ({
     );
     
     // Стрелки: если враг вплотную (distance === 1), урон снижается втрое
-    // Если враг далеко (distance > 5), урон снижается вдвое
+    // Если дистанция > range стрелка, урон снижается вдвое
+    // Если на пути есть препятствие, урон всегда вдвое
     let forcedMelee = false;
+    let hasObstacleInPath = false;
     if (attacker.attackRange === 'ranged') {
       // Проверяем, заблокирован ли стрелок (есть враг вплотную)
       const allEnemyUnits = attacker.owner === 'player' ? state.enemyUnits : state.playerUnits;
@@ -259,8 +261,8 @@ export const useGameStore = create<GameState>((set, get) => ({
           // Не может атаковать на дистанции, если заблокирован
           return { damage: 0, isCrit: false };
         }
-      } else if (distance > 5) {
-        // Дальняя атака со штрафом
+      } else if (distance > attacker.range) {
+        // Дальняя атака за пределами дальности - штраф
         damage = Math.floor(damage / 2);
       }
     }
@@ -273,8 +275,11 @@ export const useGameStore = create<GameState>((set, get) => ({
     const newHealth = Math.max(0, target.currentHealth - damage);
     const isDead = newHealth === 0;
     
-    const attackerEnergy = Math.min(attacker.maxEnergy, attacker.currentEnergy + 15);
-    const targetEnergy = isDead ? 0 : Math.min(target.maxEnergy, target.currentEnergy + 10);
+    // Энергия: ближний бой +15, дальний +10, получение удара +20
+    const isMeleeAttack = attacker.attackRange === 'melee' || forcedMelee;
+    const attackerEnergyGain = isMeleeAttack ? 15 : 10;
+    const attackerEnergy = Math.min(attacker.maxEnergy, attacker.currentEnergy + attackerEnergyGain);
+    const targetEnergy = isDead ? 0 : Math.min(target.maxEnergy, target.currentEnergy + 20);
     
     const updateUnit = (units: BattleUnit[], unitId: string, updates: Partial<BattleUnit>) =>
       units.map(u => u.id === unitId ? { ...u, ...updates } : u);
@@ -502,10 +507,13 @@ export const useGameStore = create<GameState>((set, get) => ({
     const updateUnit = (units: BattleUnit[], unitId: string, updates: Partial<BattleUnit>) =>
       units.map(u => u.id === unitId ? { ...u, ...updates } : u);
     
-    // Deduct energy for ultimate
+    // Deduct energy for ultimate, active skill gives +10 energy
     let casterEnergy = caster.currentEnergy;
     if (skillType === 'ultimate') {
       casterEnergy = Math.max(0, caster.currentEnergy - (skill.energyCost || 100));
+    } else {
+      // Active skill gives +10 energy
+      casterEnergy = Math.min(caster.maxEnergy, caster.currentEnergy + 10);
     }
     
     // Apply to each target
