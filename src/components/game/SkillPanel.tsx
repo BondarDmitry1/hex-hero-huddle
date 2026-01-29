@@ -1,6 +1,6 @@
 import { BattleUnit, SkillMode } from '@/store/gameStore';
 import { cn } from '@/lib/utils';
-import { Zap, Target, X, Shield } from 'lucide-react';
+import { Zap, Target, X, Shield, Footprints, Hand } from 'lucide-react';
 
 interface SkillPanelProps {
   unit: BattleUnit;
@@ -14,6 +14,7 @@ export const SkillPanel = ({ unit, onUseSkill, skillMode, isViewOnly = false, is
   const canUseUltimate = unit.currentEnergy >= (unit.skills.ultimate.energyCost || 100);
   const isActiveMode = skillMode === 'active';
   const isUltimateMode = skillMode === 'ultimate';
+  const isPassiveActive = true; // По умолчанию пассивка всегда активна (условия отключения пропишем позже)
   
   // Compact horizontal layout for bottom panel
   if (isCompact) {
@@ -28,6 +29,32 @@ export const SkillPanel = ({ unit, onUseSkill, skillMode, isViewOnly = false, is
               <span className="text-health">❤️ {unit.currentHealth}/{unit.maxHealth}</span>
               <span className="text-energy">⚡ {unit.currentEnergy}/{unit.maxEnergy}</span>
             </div>
+          </div>
+        </div>
+
+        {/* Action Points */}
+        <div className="flex gap-2">
+          <div 
+            className={cn(
+              "flex items-center gap-1 px-2 py-1.5 rounded-lg border transition-all",
+              !unit.hasMoved 
+                ? "bg-green-900/40 border-green-500/60 text-green-300" 
+                : "bg-muted/50 border-muted-foreground/20 text-muted-foreground/50"
+            )}
+            title="Очко перемещения"
+          >
+            <Footprints className="w-4 h-4" />
+          </div>
+          <div 
+            className={cn(
+              "flex items-center gap-1 px-2 py-1.5 rounded-lg border transition-all",
+              !unit.hasActed 
+                ? "bg-orange-900/40 border-orange-500/60 text-orange-300" 
+                : "bg-muted/50 border-muted-foreground/20 text-muted-foreground/50"
+            )}
+            title="Очко действия"
+          >
+            <Hand className="w-4 h-4" />
           </div>
         </div>
 
@@ -50,6 +77,22 @@ export const SkillPanel = ({ unit, onUseSkill, skillMode, isViewOnly = false, is
 
         {/* Skills row */}
         <div className="flex-1 flex gap-2">
+          {/* Passive */}
+          <div
+            className={cn(
+              'border rounded-lg px-3 py-2 transition-all',
+              isPassiveActive 
+                ? 'bg-sky-900/30 border-sky-500/50' 
+                : 'bg-sky-900/10 border-sky-500/20 opacity-50'
+            )}
+            title={unit.skills.passive.description}
+          >
+            <div className="flex items-center gap-2">
+              <span>🔵</span>
+              <span className="font-display text-sm text-sky-300">{unit.skills.passive.name}</span>
+            </div>
+          </div>
+
           {/* Active */}
           <button
             onClick={() => onUseSkill('active')}
@@ -96,14 +139,6 @@ export const SkillPanel = ({ unit, onUseSkill, skillMode, isViewOnly = false, is
             </div>
           </button>
         </div>
-
-        {/* Status */}
-        {(unit.hasMoved || unit.hasActed) && (
-          <div className="flex gap-2 text-xs">
-            {unit.hasMoved && <span className="px-2 py-1 bg-muted rounded">✓ Перемещён</span>}
-            {unit.hasActed && <span className="px-2 py-1 bg-muted rounded">✓ Действие</span>}
-          </div>
-        )}
       </div>
     );
   }
