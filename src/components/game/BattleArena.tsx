@@ -358,12 +358,13 @@ export const BattleArena = () => {
   }, [currentUnit, allUnits, selectedUnit, movementRange, moveUnit, attackUnit, setSelectedUnit, gameOver, showAttackAnimation, showDamagePopup, skillMode, skillRange, setSkillMode, setSkillRange, useSkill, hexToPixel, isRangedBlocked]);
 
   const handleHexHover = useCallback((q: number, r: number, unit: BattleUnit | null) => {
-    if (unit && unit.owner === 'enemy' && currentUnit && currentUnit.owner === 'player' && !currentUnit.hasActed) {
+    // Set hovered unit for showing info panel on right
+    if (unit && !unit.isDead) {
       setHoveredUnit(unit);
-    } else {
+    } else if (!unit) {
       setHoveredUnit(null);
     }
-  }, [currentUnit, setHoveredUnit]);
+  }, [setHoveredUnit]);
 
   const handleEndTurn = () => endTurn();
 
@@ -446,7 +447,7 @@ export const BattleArena = () => {
 
   return (
     <div className="h-screen bg-background flex flex-col overflow-hidden">
-      {/* Header */}
+      {/* Header with turn order */}
       <div className="flex-shrink-0 bg-card border-b border-border px-4 py-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -456,8 +457,26 @@ export const BattleArena = () => {
             >
               <ArrowLeft className="w-4 h-4" />
             </button>
-            <div>
-              <h1 className="text-lg font-display font-bold text-primary">Арена Битвы</h1>
+            <h1 className="text-lg font-display font-bold text-primary">Арена Битвы</h1>
+          </div>
+
+          {/* Turn order bar - moved to top */}
+          <div className="flex-1 flex justify-center mx-4">
+            <div className="flex gap-1 overflow-x-auto max-w-lg">
+              {turnOrder.filter(u => !u.isDead).map((unit, index) => (
+                <div
+                  key={`${unit.id}-${index}`}
+                  className={cn(
+                    'flex-shrink-0 w-9 h-9 rounded flex items-center justify-center border-2 transition-all',
+                    turnOrder.indexOf(unit) === currentUnitIndex && 'ring-2 ring-primary scale-110',
+                    unit.owner === 'player' 
+                      ? 'bg-health/10 border-health/50' 
+                      : 'bg-destructive/10 border-destructive/50'
+                  )}
+                >
+                  <span className="text-base">{unit.avatar}</span>
+                </div>
+              ))}
             </div>
           </div>
 
@@ -489,11 +508,18 @@ export const BattleArena = () => {
 
       {/* Battle area */}
       <div className="flex-1 flex overflow-hidden min-h-0">
-        {/* Left sidebar */}
+        {/* Left sidebar - player team */}
         <div className="w-32 flex-shrink-0 bg-secondary/20 border-r border-border p-2 overflow-y-auto">
           <h3 className="font-display text-xs text-health mb-2">Ваша команда</h3>
           <div className="space-y-1">
             {playerUnits.map((unit) => (
+              <UnitMiniCard key={unit.id} unit={unit} isActive={currentUnit?.id === unit.id} />
+            ))}
+          </div>
+          
+          <h3 className="font-display text-xs text-destructive mb-2 mt-4">Враги</h3>
+          <div className="space-y-1">
+            {enemyUnits.map((unit) => (
               <UnitMiniCard key={unit.id} unit={unit} isActive={currentUnit?.id === unit.id} />
             ))}
           </div>
@@ -523,51 +549,36 @@ export const BattleArena = () => {
           </div>
           
           {/* Battle log */}
-          <div className="flex-shrink-0 h-16 bg-card/50 border-t border-border px-3 py-2 overflow-y-auto">
+          <div className="flex-shrink-0 h-12 bg-card/50 border-t border-border px-3 py-1 overflow-y-auto">
             <div className="space-y-0.5">
-              {battleLog.slice(-3).map((log, i) => (
+              {battleLog.slice(-2).map((log, i) => (
                 <p key={i} className="text-xs text-muted-foreground">{log}</p>
               ))}
             </div>
           </div>
         </div>
 
-        {/* Right sidebar */}
-        <div className="w-56 flex-shrink-0 bg-secondary/20 border-l border-border p-2 overflow-y-auto flex flex-col gap-3">
-          {currentUnit && currentUnit.owner === 'player' && (
-            <SkillPanel unit={currentUnit} onUseSkill={handleUseSkill} skillMode={skillMode} />
-          )}
-          
-          <div>
-            <h3 className="font-display text-xs text-destructive mb-2">Враги</h3>
-            <div className="space-y-1">
-              {enemyUnits.map((unit) => (
-                <UnitMiniCard key={unit.id} unit={unit} isActive={currentUnit?.id === unit.id} />
-              ))}
+        {/* Right sidebar - Hovered unit info */}
+        <div className="w-60 flex-shrink-0 bg-secondary/20 border-l border-border p-2 overflow-y-auto">
+          {hoveredUnit ? (
+            <SkillPanel unit={hoveredUnit} onUseSkill={() => {}} skillMode={null} isViewOnly />
+          ) : (
+            <div className="text-center text-muted-foreground text-sm py-8">
+              <p>Наведите на героя</p>
+              <p className="text-xs mt-1">чтобы увидеть его характеристики</p>
             </div>
-          </div>
+          )}
         </div>
       </div>
 
-      {/* Turn order bar */}
-      <div className="flex-shrink-0 bg-card border-t border-border px-4 py-2">
-        <div className="flex gap-1 overflow-x-auto">
-          {turnOrder.filter(u => !u.isDead).map((unit, index) => (
-            <div
-              key={`${unit.id}-${index}`}
-              className={cn(
-                'flex-shrink-0 w-9 h-9 rounded flex items-center justify-center border-2 transition-all',
-                turnOrder.indexOf(unit) === currentUnitIndex && 'ring-2 ring-primary scale-110',
-                unit.owner === 'player' 
-                  ? 'bg-health/10 border-health/50' 
-                  : 'bg-destructive/10 border-destructive/50'
-              )}
-            >
-              <span className="text-base">{unit.avatar}</span>
-            </div>
-          ))}
+      {/* Bottom - Active hero skills */}
+      {currentUnit && currentUnit.owner === 'player' && (
+        <div className="flex-shrink-0 bg-card border-t border-border px-4 py-2">
+          <div className="max-w-2xl mx-auto">
+            <SkillPanel unit={currentUnit} onUseSkill={handleUseSkill} skillMode={skillMode} isCompact />
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };

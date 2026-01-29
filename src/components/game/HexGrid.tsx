@@ -117,7 +117,8 @@ export const HexGrid = ({
             } else {
               // Стрелок свободен - дальняя атака
               isInAttackRange = true;
-              if (distance > 5) {
+              // Штраф если дистанция больше range героя
+              if (distance > currentUnit.range) {
                 attackDistancePenalty = true;
               }
             }
@@ -217,28 +218,7 @@ export const HexGrid = ({
                 {unit.avatar}
               </text>
               
-              {/* Attack indicator - static, type-based */}
-              {isInAttackRange && hoveredEnemy?.id === unit.id && (
-                <g>
-                  <circle
-                    cx={x + HEX_SIZE * 0.6}
-                    cy={y - HEX_SIZE * 0.6}
-                    r={14}
-                    className={cn(
-                      forcedMeleeAttack ? "fill-orange-600" : "fill-destructive"
-                    )}
-                    filter="url(#glow)"
-                  />
-                  <text
-                    x={x + HEX_SIZE * 0.6}
-                    y={y - HEX_SIZE * 0.6 + 5}
-                    textAnchor="middle"
-                    className="text-sm fill-white font-bold select-none pointer-events-none"
-                  >
-                    {forcedMeleeAttack ? '⚔' : attackDistancePenalty ? '🏹½' : currentUnit?.attackRange === 'melee' ? '⚔' : '🏹'}
-                  </text>
-                </g>
-              )}
+              {/* Attack indicator - static, type-based - rendered in separate layer */}
               
               {/* Health bar */}
               <g transform={`translate(${x - 16}, ${y + HEX_SIZE * 0.65})`}>
@@ -288,6 +268,31 @@ export const HexGrid = ({
             </text>
           )}
         </g>
+      ))}
+      
+      {/* Attack indicators layer - rendered on top to avoid overlap */}
+      {hexes.map(({ q, r, x, y, unit, isInAttackRange, attackDistancePenalty, forcedMeleeAttack }) => (
+        unit && isInAttackRange && hoveredEnemy?.id === unit.id && (
+          <g key={`attack-${q}-${r}`} style={{ pointerEvents: 'none' }}>
+            <circle
+              cx={x + HEX_SIZE * 0.7}
+              cy={y - HEX_SIZE * 0.7}
+              r={14}
+              className={cn(
+                forcedMeleeAttack ? "fill-orange-600" : "fill-destructive"
+              )}
+              filter="url(#glow)"
+            />
+            <text
+              x={x + HEX_SIZE * 0.7}
+              y={y - HEX_SIZE * 0.7 + 5}
+              textAnchor="middle"
+              className="text-sm fill-white font-bold select-none"
+            >
+              {forcedMeleeAttack ? '⚔' : attackDistancePenalty ? '🏹½' : currentUnit?.attackRange === 'melee' ? '⚔' : '🏹'}
+            </text>
+          </g>
+        )
       ))}
       
       {/* Attack animations - smooth projectile */}
