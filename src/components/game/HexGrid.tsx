@@ -376,17 +376,20 @@ export const HexGrid = ({
   );
 };
 
-// Generate symmetric obstacles
-export const generateObstacles = (width: number, height: number, count: number): Set<string> => {
+// Generate symmetric obstacles with random count 9-18
+export const generateObstacles = (width: number, height: number): Set<string> => {
   const obstacles = new Set<string>();
   const midQ = Math.floor(width / 2);
   const validQRange = { min: 2, max: width - 3 };
   
+  // Random count between 9 and 18
+  const targetCount = Math.floor(Math.random() * 10) + 9; // 9-18
+  
   let placed = 0;
   let attempts = 0;
-  const maxAttempts = count * 20;
+  const maxAttempts = targetCount * 20;
   
-  while (placed < count && attempts < maxAttempts) {
+  while (placed < targetCount && attempts < maxAttempts) {
     attempts++;
     const q = Math.floor(Math.random() * (midQ - validQRange.min)) + validQRange.min;
     const r = Math.floor(Math.random() * height);

@@ -31,7 +31,7 @@ export const BattleArena = () => {
     setSkillRange,
   } = useGameStore();
 
-  const [obstacles] = useState(() => generateObstacles(GRID_WIDTH, GRID_HEIGHT, 8));
+  const [obstacles] = useState(() => generateObstacles(GRID_WIDTH, GRID_HEIGHT));
   const [damagePopups, setDamagePopups] = useState<DamagePopup[]>([]);
   const [attackAnimations, setAttackAnimations] = useState<AttackAnimation[]>([]);
   const [meleeShakeUnits, setMeleeShakeUnits] = useState<MeleeShakeUnit[]>([]);
@@ -508,24 +508,20 @@ export const BattleArena = () => {
 
       {/* Battle area */}
       <div className="flex-1 flex overflow-hidden min-h-0">
-        {/* Left sidebar - player team */}
-        <div className="w-32 flex-shrink-0 bg-secondary/20 border-r border-border p-2 overflow-y-auto">
-          <h3 className="font-display text-xs text-health mb-2">Ваша команда</h3>
+        {/* Left sidebar - Battle log */}
+        <div className="w-48 flex-shrink-0 bg-secondary/20 border-r border-border p-2 overflow-y-auto">
+          <h3 className="font-display text-xs text-muted-foreground mb-2">📜 Журнал боя</h3>
           <div className="space-y-1">
-            {playerUnits.map((unit) => (
-              <UnitMiniCard key={unit.id} unit={unit} isActive={currentUnit?.id === unit.id} />
+            {battleLog.slice(-15).map((log, i) => (
+              <p key={i} className="text-xs text-muted-foreground/80 border-b border-border/30 pb-1">{log}</p>
             ))}
-          </div>
-          
-          <h3 className="font-display text-xs text-destructive mb-2 mt-4">Враги</h3>
-          <div className="space-y-1">
-            {enemyUnits.map((unit) => (
-              <UnitMiniCard key={unit.id} unit={unit} isActive={currentUnit?.id === unit.id} />
-            ))}
+            {battleLog.length === 0 && (
+              <p className="text-xs text-muted-foreground/50 italic">Бой начинается...</p>
+            )}
           </div>
         </div>
 
-        {/* Center - Hex grid */}
+        {/* Center - Hex grid + skill panel */}
         <div className="flex-1 flex flex-col min-w-0">
           <div className="flex-1 flex items-center justify-center p-2 min-h-0">
             <HexGrid
@@ -548,14 +544,14 @@ export const BattleArena = () => {
             />
           </div>
           
-          {/* Battle log */}
-          <div className="flex-shrink-0 h-12 bg-card/50 border-t border-border px-3 py-1 overflow-y-auto">
-            <div className="space-y-0.5">
-              {battleLog.slice(-2).map((log, i) => (
-                <p key={i} className="text-xs text-muted-foreground">{log}</p>
-              ))}
+          {/* Bottom - Active hero skills (centered under grid) */}
+          {currentUnit && currentUnit.owner === 'player' && (
+            <div className="flex-shrink-0 bg-card/80 border-t border-border px-4 py-2">
+              <div className="flex justify-center">
+                <SkillPanel unit={currentUnit} onUseSkill={handleUseSkill} skillMode={skillMode} isCompact />
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         {/* Right sidebar - Hovered unit info */}
@@ -570,15 +566,6 @@ export const BattleArena = () => {
           )}
         </div>
       </div>
-
-      {/* Bottom - Active hero skills */}
-      {currentUnit && currentUnit.owner === 'player' && (
-        <div className="flex-shrink-0 bg-card border-t border-border px-4 py-2">
-          <div className="max-w-2xl mx-auto">
-            <SkillPanel unit={currentUnit} onUseSkill={handleUseSkill} skillMode={skillMode} isCompact />
-          </div>
-        </div>
-      )}
     </div>
   );
 };

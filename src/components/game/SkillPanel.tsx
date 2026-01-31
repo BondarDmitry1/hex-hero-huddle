@@ -1,12 +1,13 @@
 import { BattleUnit, SkillMode } from '@/store/gameStore';
 import { cn } from '@/lib/utils';
-import { Zap, Target, X, Shield, Footprints, Hand, Swords, Sparkles, Wind, Heart, Gauge } from 'lucide-react';
+import { Zap, Target, Shield, Footprints, Hand, Swords, Sparkles, Wind, Heart, Gauge, X } from 'lucide-react';
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { getSkillIcon } from './SkillIcons';
 
 interface SkillPanelProps {
   unit: BattleUnit;
@@ -227,7 +228,7 @@ export const SkillPanel = ({ unit, onUseSkill, skillMode, isViewOnly = false, is
 
           {/* Skills as icons */}
           <div className="flex gap-2">
-            {/* Passive - no frame */}
+            {/* Passive - no frame, just icon */}
             <Tooltip>
               <TooltipTrigger asChild>
                 <div
@@ -238,7 +239,7 @@ export const SkillPanel = ({ unit, onUseSkill, skillMode, isViewOnly = false, is
                       : 'text-sky-300/30'
                   )}
                 >
-                  <span className="text-xl">🔵</span>
+                  {getSkillIcon(unit.skills.passive.id, 'lg')}
                 </div>
               </TooltipTrigger>
               <TooltipContent className="max-w-xs">
@@ -248,7 +249,7 @@ export const SkillPanel = ({ unit, onUseSkill, skillMode, isViewOnly = false, is
               </TooltipContent>
             </Tooltip>
 
-            {/* Active - framed */}
+            {/* Active - framed with icon */}
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -257,13 +258,13 @@ export const SkillPanel = ({ unit, onUseSkill, skillMode, isViewOnly = false, is
                   className={cn(
                     'w-10 h-10 flex items-center justify-center rounded-lg border-2 transition-all',
                     isActiveMode 
-                      ? 'bg-amber-700/40 border-amber-400 ring-2 ring-amber-400/50' 
+                      ? 'bg-amber-700/40 border-amber-400 ring-2 ring-amber-400/50 text-amber-300' 
                       : !unit.hasActed 
-                        ? 'bg-amber-900/20 border-amber-500/50 hover:bg-amber-900/40 cursor-pointer'
-                        : 'bg-amber-900/10 border-amber-500/20 opacity-50 cursor-not-allowed'
+                        ? 'bg-amber-900/20 border-amber-500/50 hover:bg-amber-900/40 cursor-pointer text-amber-400'
+                        : 'bg-amber-900/10 border-amber-500/20 opacity-50 cursor-not-allowed text-amber-400/50'
                   )}
                 >
-                  <span className="text-xl">🟡</span>
+                  {getSkillIcon(unit.skills.active.id, 'lg')}
                 </button>
               </TooltipTrigger>
               <TooltipContent className="max-w-xs">
@@ -274,7 +275,7 @@ export const SkillPanel = ({ unit, onUseSkill, skillMode, isViewOnly = false, is
               </TooltipContent>
             </Tooltip>
 
-            {/* Ultimate - framed with energy fill */}
+            {/* Ultimate - framed with energy fill and icon */}
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -290,14 +291,19 @@ export const SkillPanel = ({ unit, onUseSkill, skillMode, isViewOnly = false, is
                   )}
                 >
                   <div 
-                    className="absolute inset-0 bg-purple-500/20 transition-all duration-500"
+                    className="absolute inset-0 bg-purple-500/30 transition-all duration-500"
                     style={{ 
                       height: `${(unit.currentEnergy / unit.maxEnergy) * 100}%`,
                       bottom: 0,
                       top: 'auto'
                     }}
                   />
-                  <span className="text-xl relative z-10">🟣</span>
+                  <span className={cn(
+                    "relative z-10",
+                    canUseUltimate ? "text-purple-300" : "text-purple-400/50"
+                  )}>
+                    {getSkillIcon(unit.skills.ultimate.id, 'lg')}
+                  </span>
                 </button>
               </TooltipTrigger>
               <TooltipContent className="max-w-xs">
