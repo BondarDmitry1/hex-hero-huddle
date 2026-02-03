@@ -22,6 +22,8 @@ export const BattleArena = () => {
     attackUnit,
     useSkill,
     endTurn,
+    waitAction,
+    defendAction,
     battleLog,
     hoveredUnit,
     setHoveredUnit,
@@ -423,6 +425,18 @@ export const BattleArena = () => {
     setSkillRange(newRange);
   }, [currentUnit, skillMode, setSkillMode, setSkillRange, playerUnits, enemyUnits]);
 
+  const handleWait = useCallback(() => {
+    if (currentUnit && currentUnit.owner === 'player') {
+      waitAction(currentUnit);
+    }
+  }, [currentUnit, waitAction]);
+
+  const handleDefend = useCallback(() => {
+    if (currentUnit && currentUnit.owner === 'player' && !currentUnit.hasActed) {
+      defendAction(currentUnit);
+    }
+  }, [currentUnit, defendAction]);
+
   if (gameOver) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -544,14 +558,24 @@ export const BattleArena = () => {
             />
           </div>
           
-          {/* Bottom - Active hero skills (centered under grid) */}
-          {currentUnit && currentUnit.owner === 'player' && (
-            <div className="flex-shrink-0 bg-card/80 border-t border-border px-4 py-2">
-              <div className="flex justify-center">
-                <SkillPanel unit={currentUnit} onUseSkill={handleUseSkill} skillMode={skillMode} isCompact />
-              </div>
+          {/* Bottom - Active hero skills (always visible, aligned with grid) */}
+          <div className="flex-shrink-0 bg-card border-t border-border">
+            <div className="flex justify-center py-3">
+              {currentUnit ? (
+                <SkillPanel 
+                  unit={currentUnit} 
+                  onUseSkill={currentUnit.owner === 'player' ? handleUseSkill : () => {}} 
+                  onWait={currentUnit.owner === 'player' ? handleWait : undefined}
+                  onDefend={currentUnit.owner === 'player' ? handleDefend : undefined}
+                  skillMode={skillMode} 
+                  isCompact 
+                  isViewOnly={currentUnit.owner !== 'player'}
+                />
+              ) : (
+                <div className="text-muted-foreground text-sm py-4">Загрузка...</div>
+              )}
             </div>
-          )}
+          </div>
         </div>
 
         {/* Right sidebar - Hovered unit info */}

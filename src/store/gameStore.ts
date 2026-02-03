@@ -55,6 +55,10 @@ interface GameState {
   useSkill: (caster: BattleUnit, targetPos: { q: number; r: number }, skillType: 'active' | 'ultimate') => SkillResult | null;
   endTurn: () => void;
   
+  // New actions
+  waitAction: (unit: BattleUnit) => void;
+  defendAction: (unit: BattleUnit) => void;
+  
   battleLog: string[];
   addBattleLog: (message: string) => void;
   
@@ -326,6 +330,22 @@ export const useGameStore = create<GameState>((set, get) => ({
   
   endTurn: () => {
     const state = get();
+    const currentUnit = state.turnOrder[state.currentUnitIndex];
+    
+    // Remove defense buff from unit that just acted (if they had it)
+    if (currentUnit && currentUnit.buffs?.some(b => b.type === 'defense_boost')) {
+      const removeBuff = (units: BattleUnit[]) =>
+        units.map(u => u.id === currentUnit.id 
+          ? { ...u, buffs: (u.buffs || []).filter(b => b.type !== 'defense_boost') }
+          : u
+        );
+      
+      set({
+        playerUnits: removeBuff(state.playerUnits),
+        enemyUnits: removeBuff(state.enemyUnits),
+        turnOrder: removeBuff(state.turnOrder),
+      });
+    }
     
     let nextIndex = state.currentUnitIndex;
     let attempts = 0;
@@ -353,6 +373,67 @@ export const useGameStore = create<GameState>((set, get) => ({
       skillMode: null,
       skillRange: new Set<string>(),
     });
+  },
+  
+  // Wait action - move unit to mirrored position in initiative
+  waitAction: (unit) => {
+    const state = get();
+    const aliveUnits = state.turnOrder.filter(u => !u.isDead);
+    const currentPosInAlive = aliveUnits.findIndex(u => u.id === unit.id);
+    
+    if (currentPosInAlive === -1) return;
+    
+    // Calculate mirrored position: first becomes last, second becomes second-to-last, etc.
+    const mirroredPos = aliveUnits.length - 1 - currentPosInAlive;
+    
+    // Create new turn order with unit moved
+    const newAliveOrder = [...aliveUnits];
+    newAliveOrder.splice(currentPosInAlive, 1);
+    newAliveOrder.splice(mirroredPos, 0, unit);
+    
+    // Reconstruct full turn order (including dead units in their original positions)
+    const newTurnOrder = state.turnOrder.map(u => {
+      if (u.isDead) return u;
+      const newPos = newAliveOrder.findIndex(au => au.id === u.id);
+      return newAliveOrder[newPos] || u;
+    }).filter(u => u.isDead).concat(newAliveOrder);
+    
+    // Actually just reorder based on alive units order
+    const deadUnits = state.turnOrder.filter(u => u.isDead);
+    const finalTurnOrder = [...newAliveOrder, ...deadUnits];
+    
+    set({ turnOrder: finalTurnOrder });
+    
+    get().addBattleLog(`⏳ ${unit.avatar} ${unit.name} ждёт...`);
+    get().endTurn();
+  },
+  
+  // Defend action - gain energy and defense buff
+  defendAction: (unit) => {
+    const state = get();
+    
+    const newEnergy = Math.min(unit.maxEnergy, unit.currentEnergy + 10);
+    const newBuffs = [...(unit.buffs || []), { type: 'defense_boost', duration: 1, value: 1 }];
+    
+    const updateUnit = (units: BattleUnit[], unitId: string, updates: Partial<BattleUnit>) =>
+      units.map(u => u.id === unitId ? { ...u, ...updates } : u);
+    
+    const updates = { hasActed: true, currentEnergy: newEnergy, buffs: newBuffs };
+    
+    if (unit.owner === 'player') {
+      set({ playerUnits: updateUnit(state.playerUnits, unit.id, updates) });
+    } else {
+      set({ enemyUnits: updateUnit(state.enemyUnits, unit.id, updates) });
+    }
+    
+    set({
+      turnOrder: updateUnit(state.turnOrder, unit.id, updates),
+      selectedUnit: state.selectedUnit?.id === unit.id 
+        ? { ...state.selectedUnit, ...updates } 
+        : state.selectedUnit,
+    });
+    
+    get().addBattleLog(`🛡️ ${unit.avatar} ${unit.name} принимает оборонительную стойку (+10⚡, +1🛡️)`);
   },
   
   useSkill: (caster, targetPos, skillType) => {
