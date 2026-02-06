@@ -1,8 +1,9 @@
 import { BattleUnit, SkillMode } from '@/store/gameStore';
+import { traitLabels, traitDescriptions, reactionLabels, reactionDescriptions } from '@/data/heroes';
 import { cn } from '@/lib/utils';
 import { 
   Zap, Target, Shield, Footprints, Hand, Swords, Sparkles, 
-  Wind, Heart, Gauge, Clock, ShieldPlus, Plus
+  Wind, Heart, Gauge, Clock, ShieldPlus, Eye, RefreshCcw
 } from 'lucide-react';
 import {
   Tooltip,
@@ -34,29 +35,44 @@ export const SkillPanel = ({
   const canUseUltimate = unit.currentEnergy >= (unit.skills.ultimate.energyCost || 100);
   const isActiveMode = skillMode === 'active';
   const isUltimateMode = skillMode === 'ultimate';
-  const isPassiveActive = true; // По умолчанию пассивка всегда активна
+  const isPassiveActive = true;
   
-  // Check for temporary defense buff
   const hasDefenseBuff = unit.buffs?.some(b => b.type === 'defense_boost');
+  const hasParryPhys = unit.buffs?.some(b => b.type === 'parry_phys');
+  const hasParryMag = unit.buffs?.some(b => b.type === 'parry_mag');
   
-  // Compact horizontal layout for bottom panel
+  // Calculate actual defenses with buffs
+  const physDef = unit.physicalDefense + (hasDefenseBuff ? 1 : 0) + (hasParryPhys ? 2 : 0);
+  const magDef = unit.magicalDefense + (hasDefenseBuff ? 1 : 0) + (hasParryMag ? 2 : 0);
+  
   if (isCompact) {
-    // Collect status effects for display
-    const positiveEffects = unit.buffs?.filter(b => b.type === 'defense_boost') || [];
-    const negativeEffects: Array<{ type: string; name: string }> = []; // Placeholder for future debuffs
-    const allEffects = [...positiveEffects.map(e => ({ ...e, positive: true })), ...negativeEffects.map(e => ({ ...e, positive: false }))];
+    const positiveEffects = unit.buffs?.filter(b => 
+      b.type === 'defense_boost' || b.type === 'parry_phys' || b.type === 'parry_mag'
+    ) || [];
+    const negativeEffects: Array<{ type: string; name: string }> = [];
+    const allEffects = [
+      ...positiveEffects.map(e => ({ ...e, positive: true })), 
+      ...negativeEffects.map(e => ({ ...e, positive: false }))
+    ];
+
+    const getEffectLabel = (type: string) => {
+      if (type === 'defense_boost') return { name: 'Готовность', desc: '+1 к обеим защитам' };
+      if (type === 'parry_phys') return { name: 'Парирование', desc: '+2 физ. защиты' };
+      if (type === 'parry_mag') return { name: 'Парирование', desc: '+2 маг. защиты' };
+      return { name: 'Эффект', desc: '' };
+    };
     
     return (
       <TooltipProvider delayDuration={200}>
         <div className="flex items-center gap-3 py-3 px-4">
-          {/* Hero avatar & name */}
+          {/* Hero avatar & name - fixed width to prevent jitter */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className="flex items-center gap-2 cursor-default min-w-[100px]">
+              <div className="flex items-center gap-2 cursor-default w-[110px] flex-shrink-0">
                 <span className="text-3xl">{unit.avatar}</span>
-                <div>
-                  <h3 className="font-display font-bold text-foreground text-sm leading-tight">{unit.name}</h3>
-                  <p className="text-[9px] text-muted-foreground">{unit.title || 'Герой'}</p>
+                <div className="min-w-0">
+                  <h3 className="font-display font-bold text-foreground text-sm leading-tight truncate">{unit.name}</h3>
+                  <p className="text-[9px] text-muted-foreground truncate">{unit.title || 'Герой'}</p>
                 </div>
               </div>
             </TooltipTrigger>
@@ -67,30 +83,32 @@ export const SkillPanel = ({
             </TooltipContent>
           </Tooltip>
 
-          {/* Divider */}
-          <div className="w-px h-14 bg-border/50" />
+          <div className="w-px h-14 bg-border/50 flex-shrink-0" />
 
-          {/* Status Effects - 2 columns grid, shrink as needed */}
-          <div className="grid grid-cols-2 gap-0.5 min-w-[40px] max-w-[56px]">
+          {/* Status Effects - fixed width */}
+          <div className="grid grid-cols-2 gap-0.5 w-[44px] flex-shrink-0">
             {allEffects.length > 0 ? (
-              allEffects.slice(0, 6).map((effect, idx) => (
-                <Tooltip key={idx}>
-                  <TooltipTrigger asChild>
-                    <div className={cn(
-                      "w-5 h-5 rounded flex items-center justify-center cursor-default",
-                      effect.positive 
-                        ? "bg-green-900/40 border border-green-500/60" 
-                        : "bg-red-900/40 border border-red-500/60"
-                    )}>
-                      <ShieldPlus className={cn("w-3 h-3", effect.positive ? "text-green-400" : "text-red-400")} />
-                    </div>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p className={effect.positive ? "text-green-400" : "text-red-400"}>Готовность</p>
-                    <p className="text-xs text-muted-foreground">+1 к обеим защитам</p>
-                  </TooltipContent>
-                </Tooltip>
-              ))
+              allEffects.slice(0, 6).map((effect, idx) => {
+                const info = getEffectLabel(effect.type);
+                return (
+                  <Tooltip key={idx}>
+                    <TooltipTrigger asChild>
+                      <div className={cn(
+                        "w-5 h-5 rounded flex items-center justify-center cursor-default",
+                        effect.positive 
+                          ? "bg-green-900/40 border border-green-500/60" 
+                          : "bg-red-900/40 border border-red-500/60"
+                      )}>
+                        <ShieldPlus className={cn("w-3 h-3", effect.positive ? "text-green-400" : "text-red-400")} />
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p className={effect.positive ? "text-green-400" : "text-red-400"}>{info.name}</p>
+                      <p className="text-xs text-muted-foreground">{info.desc}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                );
+              })
             ) : (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -104,19 +122,18 @@ export const SkillPanel = ({
             )}
           </div>
 
-          {/* Divider */}
-          <div className="w-px h-14 bg-border/50" />
+          <div className="w-px h-14 bg-border/50 flex-shrink-0" />
 
-          {/* Skills and Actions - all same size */}
-          <div className="flex gap-1.5 items-center">
-            {/* Active skill - framed */}
+          {/* Skills and Actions */}
+          <div className="flex gap-1.5 items-center flex-shrink-0">
+            {/* Active skill */}
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   onClick={() => onUseSkill('active')}
                   disabled={unit.hasActed}
                   className={cn(
-                    'w-9 h-9 flex items-center justify-center rounded-lg border-2 transition-all',
+                    'w-9 h-9 flex items-center justify-center rounded-lg border-2 transition-all flex-shrink-0',
                     isActiveMode 
                       ? 'bg-amber-700/40 border-amber-400 ring-2 ring-amber-400/50 text-amber-300' 
                       : !unit.hasActed 
@@ -135,14 +152,14 @@ export const SkillPanel = ({
               </TooltipContent>
             </Tooltip>
 
-            {/* Ultimate - framed with energy fill */}
+            {/* Ultimate */}
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   onClick={() => onUseSkill('ultimate')}
                   disabled={!canUseUltimate || unit.hasActed}
                   className={cn(
-                    'w-9 h-9 flex items-center justify-center rounded-lg border-2 transition-all relative overflow-hidden',
+                    'w-9 h-9 flex items-center justify-center rounded-lg border-2 transition-all relative overflow-hidden flex-shrink-0',
                     isUltimateMode
                       ? 'bg-purple-700/40 border-purple-400 ring-2 ring-purple-400/50'
                       : canUseUltimate && !unit.hasActed
@@ -175,15 +192,13 @@ export const SkillPanel = ({
               </TooltipContent>
             </Tooltip>
 
-            {/* Passive - no frame, same size */}
+            {/* Passive */}
             <Tooltip>
               <TooltipTrigger asChild>
                 <div
                   className={cn(
-                    'w-9 h-9 flex items-center justify-center transition-all cursor-default',
-                    isPassiveActive 
-                      ? 'text-sky-300' 
-                      : 'text-sky-300/30'
+                    'w-9 h-9 flex items-center justify-center transition-all cursor-default flex-shrink-0',
+                    isPassiveActive ? 'text-sky-300' : 'text-sky-300/30'
                   )}
                 >
                   {getSkillIcon(unit.skills.passive.id, 'md')}
@@ -196,17 +211,16 @@ export const SkillPanel = ({
               </TooltipContent>
             </Tooltip>
 
-            {/* Small divider */}
-            <div className="w-px h-8 bg-border/40 mx-0.5" />
+            <div className="w-px h-8 bg-border/40 mx-0.5 flex-shrink-0" />
 
-            {/* Wait action */}
+            {/* Wait */}
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   onClick={onWait}
                   disabled={!onWait}
                   className={cn(
-                    'w-9 h-9 flex items-center justify-center rounded-lg border-2 transition-all',
+                    'w-9 h-9 flex items-center justify-center rounded-lg border-2 transition-all flex-shrink-0',
                     onWait
                       ? 'bg-slate-900/30 border-slate-500/50 hover:bg-slate-900/50 cursor-pointer text-slate-300'
                       : 'bg-slate-900/10 border-slate-500/20 opacity-50 cursor-not-allowed text-slate-400/50'
@@ -222,14 +236,14 @@ export const SkillPanel = ({
               </TooltipContent>
             </Tooltip>
 
-            {/* Defend action */}
+            {/* Defend */}
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   onClick={onDefend}
                   disabled={!onDefend || unit.hasActed}
                   className={cn(
-                    'w-9 h-9 flex items-center justify-center rounded-lg border-2 transition-all',
+                    'w-9 h-9 flex items-center justify-center rounded-lg border-2 transition-all flex-shrink-0',
                     onDefend && !unit.hasActed
                       ? 'bg-cyan-900/30 border-cyan-500/50 hover:bg-cyan-900/50 cursor-pointer text-cyan-300'
                       : 'bg-cyan-900/10 border-cyan-500/20 opacity-50 cursor-not-allowed text-cyan-400/50'
@@ -246,16 +260,15 @@ export const SkillPanel = ({
             </Tooltip>
           </div>
 
-          {/* Divider */}
-          <div className="w-px h-14 bg-border/50" />
+          <div className="w-px h-14 bg-border/50 flex-shrink-0" />
 
-          {/* Action Points - same size as skills */}
-          <div className="flex gap-1.5">
+          {/* Action Points */}
+          <div className="flex gap-1.5 flex-shrink-0">
             <Tooltip>
               <TooltipTrigger asChild>
                 <div 
                   className={cn(
-                    "w-9 h-9 flex items-center justify-center rounded-lg border-2 transition-all cursor-default",
+                    "w-9 h-9 flex items-center justify-center rounded-lg border-2 transition-all cursor-default flex-shrink-0",
                     !unit.hasMoved 
                       ? "bg-green-900/40 border-green-500/60 text-green-300" 
                       : "bg-muted/50 border-muted-foreground/20 text-muted-foreground/50"
@@ -276,7 +289,7 @@ export const SkillPanel = ({
               <TooltipTrigger asChild>
                 <div 
                   className={cn(
-                    "w-9 h-9 flex items-center justify-center rounded-lg border-2 transition-all cursor-default",
+                    "w-9 h-9 flex items-center justify-center rounded-lg border-2 transition-all cursor-default flex-shrink-0",
                     !unit.hasActed 
                       ? "bg-orange-900/40 border-orange-500/60 text-orange-300" 
                       : "bg-muted/50 border-muted-foreground/20 text-muted-foreground/50"
@@ -294,17 +307,15 @@ export const SkillPanel = ({
             </Tooltip>
           </div>
 
-          {/* Divider */}
-          <div className="w-px h-14 bg-border/50" />
+          <div className="w-px h-14 bg-border/50 flex-shrink-0" />
 
-          {/* Stats - 2 rows layout */}
-          <div className="grid grid-rows-2 grid-flow-col gap-x-1.5 gap-y-1 text-xs">
-            {/* Row 1: HP, Energy, Attack */}
+          {/* Stats - 2 rows, fixed width cells */}
+          <div className="grid grid-rows-2 grid-flow-col gap-x-1.5 gap-y-1 text-xs flex-shrink-0">
             <Tooltip>
               <TooltipTrigger asChild>
-                <div className="bg-muted rounded px-1.5 py-0.5 flex items-center gap-1 cursor-default">
-                  <Heart className="w-3 h-3 text-health" />
-                  <span className="text-health font-medium text-[11px]">{unit.currentHealth}/{unit.maxHealth}</span>
+                <div className="bg-muted rounded px-1.5 py-0.5 flex items-center gap-1 cursor-default min-w-[60px]">
+                  <Heart className="w-3 h-3 text-health flex-shrink-0" />
+                  <span className="text-health font-medium text-[11px] tabular-nums">{unit.currentHealth}/{unit.maxHealth}</span>
                 </div>
               </TooltipTrigger>
               <TooltipContent>
@@ -315,9 +326,9 @@ export const SkillPanel = ({
 
             <Tooltip>
               <TooltipTrigger asChild>
-                <div className="bg-muted rounded px-1.5 py-0.5 flex items-center gap-1 cursor-default">
-                  <Zap className="w-3 h-3 text-energy" />
-                  <span className="text-energy font-medium text-[11px]">{unit.currentEnergy}/{unit.maxEnergy}</span>
+                <div className="bg-muted rounded px-1.5 py-0.5 flex items-center gap-1 cursor-default min-w-[60px]">
+                  <Zap className="w-3 h-3 text-energy flex-shrink-0" />
+                  <span className="text-energy font-medium text-[11px] tabular-nums">{unit.currentEnergy}/{unit.maxEnergy}</span>
                 </div>
               </TooltipTrigger>
               <TooltipContent>
@@ -328,13 +339,13 @@ export const SkillPanel = ({
 
             <Tooltip>
               <TooltipTrigger asChild>
-                <div className="bg-muted rounded px-1.5 py-0.5 flex items-center gap-1 cursor-default">
+                <div className="bg-muted rounded px-1.5 py-0.5 flex items-center gap-1 cursor-default min-w-[40px]">
                   {unit.attackType === 'physical' ? (
-                    <Swords className="w-3 h-3 text-orange-400" />
+                    <Swords className="w-3 h-3 text-orange-400 flex-shrink-0" />
                   ) : (
-                    <Sparkles className="w-3 h-3 text-violet-400" />
+                    <Sparkles className="w-3 h-3 text-violet-400 flex-shrink-0" />
                   )}
-                  <span className={cn("font-medium text-[11px]", unit.attackType === 'physical' ? 'text-orange-400' : 'text-violet-400')}>
+                  <span className={cn("font-medium text-[11px] tabular-nums", unit.attackType === 'physical' ? 'text-orange-400' : 'text-violet-400')}>
                     {unit.attack}
                   </span>
                 </div>
@@ -345,28 +356,29 @@ export const SkillPanel = ({
               </TooltipContent>
             </Tooltip>
 
-            {/* Row 2: Defense (combined), Range, Speed, Initiative */}
             <Tooltip>
               <TooltipTrigger asChild>
-                <div className="bg-muted rounded px-1.5 py-0.5 flex items-center gap-1 cursor-default">
-                  <Shield className="w-3 h-3 text-orange-400" />
-                  <span className="text-orange-400 font-medium text-[11px]">{unit.physicalDefense + (hasDefenseBuff ? 1 : 0)}</span>
+                <div className="bg-muted rounded px-1.5 py-0.5 flex items-center gap-1 cursor-default min-w-[55px]">
+                  <Shield className="w-3 h-3 text-orange-400 flex-shrink-0" />
+                  <span className="text-orange-400 font-medium text-[11px] tabular-nums">{physDef}</span>
                   <span className="text-muted-foreground/50">/</span>
-                  <span className="text-violet-400 font-medium text-[11px]">{unit.magicalDefense + (hasDefenseBuff ? 1 : 0)}</span>
+                  <span className="text-violet-400 font-medium text-[11px] tabular-nums">{magDef}</span>
                 </div>
               </TooltipTrigger>
               <TooltipContent>
                 <p>Защита (Физ. / Маг.)</p>
                 <p className="text-xs text-muted-foreground">Снижение урона: защита × 10%</p>
                 {hasDefenseBuff && <p className="text-xs text-green-400 mt-1">+1 от Готовности</p>}
+                {hasParryPhys && <p className="text-xs text-green-400 mt-1">+2 физ. от Парирования</p>}
+                {hasParryMag && <p className="text-xs text-green-400 mt-1">+2 маг. от Парирования</p>}
               </TooltipContent>
             </Tooltip>
 
             <Tooltip>
               <TooltipTrigger asChild>
-                <div className="bg-muted rounded px-1.5 py-0.5 flex items-center gap-1 cursor-default">
-                  <Target className="w-3 h-3 text-muted-foreground" />
-                  <span className="font-medium text-[11px]">{unit.attackRange === 'melee' ? '1' : unit.range}</span>
+                <div className="bg-muted rounded px-1.5 py-0.5 flex items-center gap-1 cursor-default min-w-[28px]">
+                  <Target className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+                  <span className="font-medium text-[11px] tabular-nums">{unit.attackRange === 'melee' ? '1' : unit.range}</span>
                 </div>
               </TooltipTrigger>
               <TooltipContent>
@@ -379,9 +391,9 @@ export const SkillPanel = ({
 
             <Tooltip>
               <TooltipTrigger asChild>
-                <div className="bg-muted rounded px-1.5 py-0.5 flex items-center gap-1 cursor-default">
-                  <Wind className="w-3 h-3 text-support" />
-                  <span className="text-support font-medium text-[11px]">{unit.speed}</span>
+                <div className="bg-muted rounded px-1.5 py-0.5 flex items-center gap-1 cursor-default min-w-[28px]">
+                  <Wind className="w-3 h-3 text-support flex-shrink-0" />
+                  <span className="text-support font-medium text-[11px] tabular-nums">{unit.speed}</span>
                 </div>
               </TooltipTrigger>
               <TooltipContent>
@@ -392,9 +404,9 @@ export const SkillPanel = ({
 
             <Tooltip>
               <TooltipTrigger asChild>
-                <div className="bg-muted rounded px-1.5 py-0.5 flex items-center gap-1 cursor-default">
-                  <Gauge className="w-3 h-3 text-primary" />
-                  <span className="text-primary font-medium text-[11px]">{unit.initiative}</span>
+                <div className="bg-muted rounded px-1.5 py-0.5 flex items-center gap-1 cursor-default min-w-[28px]">
+                  <Gauge className="w-3 h-3 text-primary flex-shrink-0" />
+                  <span className="text-primary font-medium text-[11px] tabular-nums">{unit.initiative}</span>
                 </div>
               </TooltipTrigger>
               <TooltipContent>
@@ -402,36 +414,57 @@ export const SkillPanel = ({
                 <p className="text-xs text-muted-foreground">Порядок хода в раунде</p>
               </TooltipContent>
             </Tooltip>
-          </div>
 
-          {/* Divider */}
-          <div className="w-px h-14 bg-border/50" />
-
-          {/* Placeholder for two future stats - vertical column */}
-          <div className="flex flex-col gap-1">
+            {/* Trait */}
             <Tooltip>
               <TooltipTrigger asChild>
-                <div className="bg-muted/30 rounded px-1.5 py-0.5 flex items-center gap-1 cursor-default border border-dashed border-muted-foreground/20">
-                  <Plus className="w-3 h-3 text-muted-foreground/30" />
+                <div className={cn(
+                  "bg-muted rounded px-1.5 py-0.5 flex items-center gap-1 cursor-default min-w-[28px]",
+                  unit.trait !== 'none' ? 'border border-amber-500/30' : ''
+                )}>
+                  <Eye className={cn(
+                    "w-3 h-3 flex-shrink-0",
+                    unit.trait !== 'none' ? 'text-amber-400' : 'text-muted-foreground/40'
+                  )} />
                 </div>
               </TooltipTrigger>
               <TooltipContent>
-                <p>Новый стат</p>
-                <p className="text-xs text-muted-foreground">Будет добавлен позже</p>
-              </TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className="bg-muted/30 rounded px-1.5 py-0.5 flex items-center gap-1 cursor-default border border-dashed border-muted-foreground/20">
-                  <Plus className="w-3 h-3 text-muted-foreground/30" />
-                </div>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Новый стат</p>
-                <p className="text-xs text-muted-foreground">Будет добавлен позже</p>
+                <p className={unit.trait !== 'none' ? 'text-amber-400' : ''}>
+                  Особенность: {traitLabels[unit.trait]}
+                </p>
+                <p className="text-xs text-muted-foreground">{traitDescriptions[unit.trait]}</p>
               </TooltipContent>
             </Tooltip>
           </div>
+
+          <div className="w-px h-14 bg-border/50 flex-shrink-0" />
+
+          {/* Reaction - single icon */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className={cn(
+                "w-9 h-9 flex items-center justify-center rounded-lg border-2 transition-all cursor-default flex-shrink-0",
+                unit.reaction === 'none'
+                  ? "bg-muted/30 border-muted-foreground/20 text-muted-foreground/30"
+                  : unit.reactionAvailable
+                    ? "bg-yellow-900/40 border-yellow-500/60 text-yellow-300 shadow-[0_0_6px_rgba(234,179,8,0.3)]"
+                    : "bg-muted/30 border-muted-foreground/20 text-muted-foreground/40"
+              )}>
+                <RefreshCcw className="w-4 h-4" />
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p className={unit.reaction !== 'none' && unit.reactionAvailable ? 'text-yellow-400' : ''}>
+                Реакция: {reactionLabels[unit.reaction]}
+              </p>
+              <p className="text-xs text-muted-foreground">{reactionDescriptions[unit.reaction]}</p>
+              {unit.reaction !== 'none' && (
+                <p className={cn("text-xs mt-1", unit.reactionAvailable ? "text-green-400" : "text-red-400")}>
+                  {unit.reactionAvailable ? '✓ Заряд доступен' : '✗ Заряд использован (восстановится в начале хода)'}
+                </p>
+              )}
+            </TooltipContent>
+          </Tooltip>
         </div>
       </TooltipProvider>
     );
@@ -467,9 +500,9 @@ export const SkillPanel = ({
           <p className="text-muted-foreground">Защита</p>
           <p className="font-semibold flex items-center justify-center gap-1">
             <Shield className="w-3 h-3 text-orange-400" />
-            <span className="text-orange-400">{unit.physicalDefense}</span>
+            <span className="text-orange-400">{physDef}</span>
             <Shield className="w-3 h-3 text-violet-400 ml-1" />
-            <span className="text-violet-400">{unit.magicalDefense}</span>
+            <span className="text-violet-400">{magDef}</span>
           </p>
         </div>
         <div className="bg-muted rounded p-2 text-center">
@@ -479,6 +512,31 @@ export const SkillPanel = ({
         <div className="bg-muted rounded p-2 text-center">
           <p className="text-muted-foreground">Скорость</p>
           <p className="font-semibold text-support">{unit.speed}</p>
+        </div>
+      </div>
+
+      {/* Trait & Reaction */}
+      <div className="grid grid-cols-2 gap-2 mb-4 text-xs">
+        <div className={cn("rounded p-2 text-center", unit.trait !== 'none' ? "bg-amber-900/20 border border-amber-500/30" : "bg-muted")}>
+          <p className="text-muted-foreground">Особенность</p>
+          <p className={cn("font-semibold text-[11px]", unit.trait !== 'none' ? 'text-amber-400' : 'text-muted-foreground')}>
+            {traitLabels[unit.trait]}
+          </p>
+        </div>
+        <div className={cn(
+          "rounded p-2 text-center",
+          unit.reaction !== 'none' 
+            ? unit.reactionAvailable 
+              ? "bg-yellow-900/20 border border-yellow-500/30"
+              : "bg-muted border border-muted-foreground/20"
+            : "bg-muted"
+        )}>
+          <p className="text-muted-foreground">Реакция</p>
+          <p className={cn("font-semibold text-[11px]", 
+            unit.reaction !== 'none' && unit.reactionAvailable ? 'text-yellow-400' : 'text-muted-foreground'
+          )}>
+            {reactionLabels[unit.reaction]}
+          </p>
         </div>
       </div>
 
