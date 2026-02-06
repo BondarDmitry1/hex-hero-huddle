@@ -1,4 +1,4 @@
-import { Hero, calculateDamageReduction } from '@/data/heroes';
+import { Hero, calculateDamageReduction, traitLabels, traitDescriptions, reactionLabels, reactionDescriptions } from '@/data/heroes';
 import { cn } from '@/lib/utils';
 import { X, Heart, Swords, Shield, Zap, Move, Target, Crosshair, Sparkles } from 'lucide-react';
 
@@ -83,6 +83,40 @@ export const HeroDetail = ({ hero, onClose }: HeroDetailProps) => {
             />
             <StatBox icon={<Zap className="w-5 h-5 text-primary" />} label="Инициатива" value={hero.initiative} />
             <StatBox icon={<Move className="w-5 h-5 text-support" />} label="Скорость" value={`${hero.speed} гексов`} />
+          </div>
+
+          {/* Trait & Reaction */}
+          <div className="grid grid-cols-2 gap-4 mb-6">
+            <div className={cn(
+              "rounded-lg p-4 border",
+              hero.trait !== 'none' 
+                ? "bg-amber-900/20 border-amber-500/40" 
+                : "bg-muted/50 border-border"
+            )}>
+              <p className="text-xs text-muted-foreground mb-1">Особенность</p>
+              <p className={cn(
+                "font-display font-semibold",
+                hero.trait !== 'none' ? "text-amber-400" : "text-muted-foreground"
+              )}>
+                {traitLabels[hero.trait]}
+              </p>
+              <p className="text-xs text-foreground/70 mt-1">{traitDescriptions[hero.trait]}</p>
+            </div>
+            <div className={cn(
+              "rounded-lg p-4 border",
+              hero.reaction !== 'none' 
+                ? "bg-yellow-900/20 border-yellow-500/40" 
+                : "bg-muted/50 border-border"
+            )}>
+              <p className="text-xs text-muted-foreground mb-1">Реакция</p>
+              <p className={cn(
+                "font-display font-semibold",
+                hero.reaction !== 'none' ? "text-yellow-400" : "text-muted-foreground"
+              )}>
+                {reactionLabels[hero.reaction]}
+              </p>
+              <p className="text-xs text-foreground/70 mt-1">{reactionDescriptions[hero.reaction]}</p>
+            </div>
           </div>
 
           {/* Skills */}

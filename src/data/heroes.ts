@@ -2,6 +2,41 @@ export type HeroRole = 'tank' | 'attack' | 'support';
 export type DamageType = 'physical' | 'magical';
 export type AttackRange = 'melee' | 'ranged';
 
+export type HeroTrait = 'flight' | 'siege' | 'no_melee_penalty' | 'ignores_reactions' | 'none';
+export type HeroReaction = 'counterattack' | 'return_shot' | 'retreat' | 'parry' | 'none';
+
+export const traitLabels: Record<HeroTrait, string> = {
+  flight: 'Полёт',
+  siege: 'Осадный урон',
+  no_melee_penalty: 'Нет штрафа в ближнем бою',
+  ignores_reactions: 'Игнорирует реакции',
+  none: 'Нет',
+};
+
+export const traitDescriptions: Record<HeroTrait, string> = {
+  flight: 'Игнорирует препятствия при перемещении (конечная клетка должна быть свободна)',
+  siege: 'Может атаковать препятствия (1 HP). Способности тоже разрушают их',
+  no_melee_penalty: 'Стрелок атакует в ближнем бою без штрафа к урону',
+  ignores_reactions: 'Против атак этого существа не срабатывают реакции',
+  none: 'Нет особенности',
+};
+
+export const reactionLabels: Record<HeroReaction, string> = {
+  counterattack: 'Контрудар',
+  return_shot: 'Ответный выстрел',
+  retreat: 'Отход',
+  parry: 'Парирование',
+  none: 'Нет',
+};
+
+export const reactionDescriptions: Record<HeroReaction, string> = {
+  counterattack: 'При атаке ближнего боя автоматически наносит ответный удар обычной атакой',
+  return_shot: 'При атаке дальнего боя автоматически производит ответный выстрел',
+  retreat: 'При атаке ближнего боя отходит на одну клетку назад от атакующего',
+  parry: 'С шансом 50% получает +2 к защите того типа, каким была атака (до начала следующего хода)',
+  none: 'Нет реакции',
+};
+
 export interface Skill {
   id: string;
   name: string;
@@ -28,6 +63,8 @@ export interface Hero {
   speed: number;
   energy: number;
   maxEnergy: number;
+  trait: HeroTrait;
+  reaction: HeroReaction;
   skills: {
     passive: Skill;
     active: Skill;
@@ -56,6 +93,8 @@ export const heroes: Hero[] = [
     speed: 2,
     energy: 0,
     maxEnergy: 100,
+    trait: 'none',
+    reaction: 'counterattack',
     skills: {
       passive: {
         id: 'iron_skin',
@@ -97,6 +136,8 @@ export const heroes: Hero[] = [
     speed: 1,
     energy: 0,
     maxEnergy: 100,
+    trait: 'siege',
+    reaction: 'parry',
     skills: {
       passive: {
         id: 'stone_body',
@@ -138,6 +179,8 @@ export const heroes: Hero[] = [
     speed: 2,
     energy: 0,
     maxEnergy: 90,
+    trait: 'none',
+    reaction: 'counterattack',
     skills: {
       passive: {
         id: 'divine_shield',
@@ -181,6 +224,8 @@ export const heroes: Hero[] = [
     speed: 4,
     energy: 0,
     maxEnergy: 80,
+    trait: 'ignores_reactions',
+    reaction: 'retreat',
     skills: {
       passive: {
         id: 'backstab',
@@ -222,6 +267,8 @@ export const heroes: Hero[] = [
     speed: 2,
     energy: 0,
     maxEnergy: 90,
+    trait: 'siege',
+    reaction: 'none',
     skills: {
       passive: {
         id: 'burning',
@@ -263,6 +310,8 @@ export const heroes: Hero[] = [
     speed: 3,
     energy: 0,
     maxEnergy: 85,
+    trait: 'no_melee_penalty',
+    reaction: 'return_shot',
     skills: {
       passive: {
         id: 'eagle_eye',
@@ -304,6 +353,8 @@ export const heroes: Hero[] = [
     speed: 3,
     energy: 0,
     maxEnergy: 70,
+    trait: 'none',
+    reaction: 'counterattack',
     skills: {
       passive: {
         id: 'blood_rage',
@@ -345,6 +396,8 @@ export const heroes: Hero[] = [
     speed: 2,
     energy: 0,
     maxEnergy: 95,
+    trait: 'none',
+    reaction: 'none',
     skills: {
       passive: {
         id: 'frostbite',
@@ -388,6 +441,8 @@ export const heroes: Hero[] = [
     speed: 3,
     energy: 0,
     maxEnergy: 100,
+    trait: 'none',
+    reaction: 'retreat',
     skills: {
       passive: {
         id: 'holy_aura',
@@ -429,6 +484,8 @@ export const heroes: Hero[] = [
     speed: 3,
     energy: 0,
     maxEnergy: 85,
+    trait: 'none',
+    reaction: 'parry',
     skills: {
       passive: {
         id: 'battle_rhythm',
@@ -470,6 +527,8 @@ export const heroes: Hero[] = [
     speed: 2,
     energy: 0,
     maxEnergy: 100,
+    trait: 'none',
+    reaction: 'none',
     skills: {
       passive: {
         id: 'life_drain',
@@ -511,6 +570,8 @@ export const heroes: Hero[] = [
     speed: 2,
     energy: 0,
     maxEnergy: 90,
+    trait: 'flight',
+    reaction: 'return_shot',
     skills: {
       passive: {
         id: 'static_charge',

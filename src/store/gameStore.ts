@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Hero, heroes, calculateDamage } from '@/data/heroes';
+import { Hero, heroes, calculateDamage, HeroTrait, HeroReaction } from '@/data/heroes';
 
 export type GamePhase = 'menu' | 'heroes' | 'draft' | 'placement' | 'battle';
 export type Player = 'player' | 'enemy';
@@ -13,6 +13,7 @@ export interface BattleUnit extends Hero {
   hasMoved: boolean;
   hasActed: boolean;
   isDead: boolean;
+  reactionAvailable: boolean;
   buffs?: { type: string; duration: number; value?: number }[];
 }
 
@@ -68,7 +69,6 @@ interface GameState {
 
 // Convert offset coordinates to cube coordinates for accurate distance (odd-r layout)
 const offsetToCube = (q: number, r: number) => {
-  // Для odd-r offset: нечётные ряды сдвинуты вправо
   const x = q - Math.floor(r / 2);
   const z = r;
   const y = -x - z;
@@ -83,6 +83,29 @@ export const hexDistance = (a: { q: number; r: number }, b: { q: number; r: numb
     Math.abs(cubeA.y - cubeB.y),
     Math.abs(cubeA.z - cubeB.z)
   );
+};
+
+// Get hex neighbors (odd-r layout)
+const getHexNeighbors = (q: number, r: number): { q: number; r: number }[] => {
+  const isOddRow = r % 2 === 1;
+  if (isOddRow) {
+    return [
+      { q: q + 1, r: r },
+      { q: q, r: r - 1 },
+      { q: q + 1, r: r - 1 },
+      { q: q, r: r + 1 },
+      { q: q + 1, r: r + 1 },
+      { q: q - 1, r: r },
+    ];
+  }
+  return [
+    { q: q + 1, r: r },
+    { q: q - 1, r: r - 1 },
+    { q: q, r: r - 1 },
+    { q: q - 1, r: r + 1 },
+    { q: q, r: r + 1 },
+    { q: q - 1, r: r },
+  ];
 };
 
 export const useGameStore = create<GameState>((set, get) => ({
@@ -160,7 +183,6 @@ export const useGameStore = create<GameState>((set, get) => ({
   initializeBattle: () => {
     const state = get();
     
-    // Position units on smaller grid (10 wide)
     const playerUnits: BattleUnit[] = state.playerDraft.map((hero, index) => ({
       ...hero,
       owner: 'player' as Player,
@@ -170,6 +192,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       hasMoved: false,
       hasActed: false,
       isDead: false,
+      reactionAvailable: hero.reaction !== 'none',
     }));
     
     const enemyUnits: BattleUnit[] = state.enemyDraft.map((hero, index) => ({
@@ -181,6 +204,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       hasMoved: false,
       hasActed: false,
       isDead: false,
+      reactionAvailable: hero.reaction !== 'none',
     }));
     
     const allUnits = [...playerUnits, ...enemyUnits];
@@ -243,13 +267,9 @@ export const useGameStore = create<GameState>((set, get) => ({
       target.magicalDefense
     );
     
-    // Стрелки: если враг вплотную (distance === 1), урон снижается втрое
-    // Если дистанция > range стрелка, урон снижается вдвое
-    // Если на пути есть препятствие, урон всегда вдвое
+    // Ranged penalties
     let forcedMelee = false;
-    let hasObstacleInPath = false;
     if (attacker.attackRange === 'ranged') {
-      // Проверяем, заблокирован ли стрелок (есть враг вплотную)
       const allEnemyUnits = attacker.owner === 'player' ? state.enemyUnits : state.playerUnits;
       const isBlocked = allEnemyUnits.some(e => {
         if (!e.position || e.isDead) return false;
@@ -257,16 +277,16 @@ export const useGameStore = create<GameState>((set, get) => ({
       });
       
       if (isBlocked) {
-        // Стрелок заблокирован - может атаковать только вплотную с уроном x1/3
         if (distance === 1) {
-          damage = Math.floor(damage / 3);
+          // Check for no_melee_penalty trait
+          if (attacker.trait !== 'no_melee_penalty') {
+            damage = Math.floor(damage / 3);
+          }
           forcedMelee = true;
         } else {
-          // Не может атаковать на дистанции, если заблокирован
           return { damage: 0, isCrit: false };
         }
       } else if (distance > attacker.range) {
-        // Дальняя атака за пределами дальности - штраф
         damage = Math.floor(damage / 2);
       }
     }
@@ -279,7 +299,6 @@ export const useGameStore = create<GameState>((set, get) => ({
     const newHealth = Math.max(0, target.currentHealth - damage);
     const isDead = newHealth === 0;
     
-    // Энергия: ближний бой +15, дальний +10, получение удара +20
     const isMeleeAttack = attacker.attackRange === 'melee' || forcedMelee;
     const attackerEnergyGain = isMeleeAttack ? 15 : 10;
     const attackerEnergy = Math.min(attacker.maxEnergy, attacker.currentEnergy + attackerEnergyGain);
@@ -295,29 +314,145 @@ export const useGameStore = create<GameState>((set, get) => ({
       set({ enemyUnits: updateUnit(state.enemyUnits, attacker.id, attackerUpdates) });
     }
     
-    const targetUpdates = { currentHealth: newHealth, currentEnergy: targetEnergy, isDead };
-    if (target.owner === 'player') {
-      set({ playerUnits: updateUnit(state.playerUnits, target.id, targetUpdates) });
-    } else {
-      set({ enemyUnits: updateUnit(state.enemyUnits, target.id, targetUpdates) });
+    const targetUpdates: Partial<BattleUnit> = { currentHealth: newHealth, currentEnergy: targetEnergy, isDead };
+    
+    // Process reactions (if target has reaction available and attacker doesn't ignore reactions)
+    if (!isDead && target.reactionAvailable && target.reaction !== 'none' && attacker.trait !== 'ignores_reactions') {
+      const reactionType = target.reaction;
+      
+      switch (reactionType) {
+        case 'counterattack': {
+          // Only triggers on melee attacks
+          if (isMeleeAttack && target.position && attacker.position && hexDistance(target.position, attacker.position) === 1) {
+            const counterDamage = calculateDamage(
+              target.attack,
+              target.attackType,
+              attacker.physicalDefense,
+              attacker.magicalDefense
+            );
+            const newAttackerHealth = Math.max(0, attacker.currentHealth - counterDamage);
+            const attackerDead = newAttackerHealth === 0;
+            
+            // Update attacker with counter damage
+            const counterUpdates = { ...attackerUpdates, currentHealth: newAttackerHealth, isDead: attackerDead };
+            if (attacker.owner === 'player') {
+              set(s => ({ playerUnits: updateUnit(s.playerUnits, attacker.id, counterUpdates) }));
+            } else {
+              set(s => ({ enemyUnits: updateUnit(s.enemyUnits, attacker.id, counterUpdates) }));
+            }
+            set(s => ({ turnOrder: updateUnit(s.turnOrder, attacker.id, counterUpdates) }));
+            
+            targetUpdates.reactionAvailable = false;
+            get().addBattleLog(`⚔️ ${target.avatar} контрудар: ${counterDamage} урона${attackerDead ? ` ☠️ ${attacker.name} повержен!` : ''}`);
+          }
+          break;
+        }
+        case 'return_shot': {
+          // Only triggers on ranged attacks
+          if (!isMeleeAttack && target.attackRange === 'ranged' && target.position && attacker.position) {
+            const shotDamage = calculateDamage(
+              target.attack,
+              target.attackType,
+              attacker.physicalDefense,
+              attacker.magicalDefense
+            );
+            const newAttackerHealth = Math.max(0, attacker.currentHealth - shotDamage);
+            const attackerDead = newAttackerHealth === 0;
+            
+            const shotUpdates = { ...attackerUpdates, currentHealth: newAttackerHealth, isDead: attackerDead };
+            if (attacker.owner === 'player') {
+              set(s => ({ playerUnits: updateUnit(s.playerUnits, attacker.id, shotUpdates) }));
+            } else {
+              set(s => ({ enemyUnits: updateUnit(s.enemyUnits, attacker.id, shotUpdates) }));
+            }
+            set(s => ({ turnOrder: updateUnit(s.turnOrder, attacker.id, shotUpdates) }));
+            
+            targetUpdates.reactionAvailable = false;
+            get().addBattleLog(`🏹 ${target.avatar} ответный выстрел: ${shotDamage} урона${attackerDead ? ` ☠️ ${attacker.name} повержен!` : ''}`);
+          }
+          break;
+        }
+        case 'retreat': {
+          // Only triggers on melee attacks
+          if (isMeleeAttack && target.position && attacker.position) {
+            // Find hex opposite to attacker
+            const dq = target.position.q - attacker.position.q;
+            const dr = target.position.r - attacker.position.r;
+            
+            // Try direct retreat first
+            const retreatQ = target.position.q + Math.sign(dq);
+            const retreatR = target.position.r + Math.sign(dr);
+            
+            const allUnits = [...state.playerUnits, ...state.enemyUnits];
+            const isOccupied = (q: number, r: number) => 
+              allUnits.some(u => u.position?.q === q && u.position?.r === r && !u.isDead) ||
+              q < 0 || q >= 10 || r < 0 || r >= 10;
+            
+            let retreatPos: { q: number; r: number } | null = null;
+            
+            if (!isOccupied(retreatQ, retreatR)) {
+              retreatPos = { q: retreatQ, r: retreatR };
+            } else {
+              // Try neighbors of retreat position
+              const neighbors = getHexNeighbors(target.position.q, target.position.r);
+              for (const n of neighbors) {
+                if (!isOccupied(n.q, n.r) && hexDistance(n, attacker.position) > 1) {
+                  retreatPos = n;
+                  break;
+                }
+              }
+            }
+            
+            if (retreatPos) {
+              targetUpdates.position = retreatPos;
+              targetUpdates.reactionAvailable = false;
+              get().addBattleLog(`🏃 ${target.avatar} отходит!`);
+            }
+          }
+          break;
+        }
+        case 'parry': {
+          // 50% chance, works on any attack
+          if (Math.random() < 0.5) {
+            const defenseType = attacker.attackType;
+            const parryBuff = { 
+              type: defenseType === 'physical' ? 'parry_phys' : 'parry_mag', 
+              duration: 1, 
+              value: 2 
+            };
+            targetUpdates.buffs = [...(target.buffs || []), parryBuff];
+            targetUpdates.reactionAvailable = false;
+            
+            const defLabel = defenseType === 'physical' ? 'физ.' : 'маг.';
+            get().addBattleLog(`🤺 ${target.avatar} парирование! +2 ${defLabel} защиты`);
+          }
+          break;
+        }
+      }
     }
     
-    set({
-      turnOrder: state.turnOrder.map(u => {
+    if (target.owner === 'player') {
+      set(s => ({ playerUnits: updateUnit(s.playerUnits, target.id, targetUpdates) }));
+    } else {
+      set(s => ({ enemyUnits: updateUnit(s.enemyUnits, target.id, targetUpdates) }));
+    }
+    
+    set(s => ({
+      turnOrder: s.turnOrder.map(u => {
         if (u.id === attacker.id) return { ...u, ...attackerUpdates };
         if (u.id === target.id) return { ...u, ...targetUpdates };
         return u;
       }),
-      selectedUnit: state.selectedUnit?.id === attacker.id 
-        ? { ...state.selectedUnit, ...attackerUpdates } 
-        : state.selectedUnit,
-    });
+      selectedUnit: s.selectedUnit?.id === attacker.id 
+        ? { ...s.selectedUnit, ...attackerUpdates } 
+        : s.selectedUnit,
+    }));
     
     const critText = isCrit ? ' 💥КРИТ!' : '';
     let distanceText = '';
     if (attacker.attackRange === 'ranged') {
       if (forcedMelee) {
-        distanceText = ' (ближний бой -66%)';
+        distanceText = attacker.trait === 'no_melee_penalty' ? '' : ' (ближний бой -66%)';
       } else if (distance > 5) {
         distanceText = ' (дальность -50%)';
       }
@@ -332,19 +467,39 @@ export const useGameStore = create<GameState>((set, get) => ({
     const state = get();
     const currentUnit = state.turnOrder[state.currentUnitIndex];
     
-    // Remove defense buff from unit that just acted (if they had it)
-    if (currentUnit && currentUnit.buffs?.some(b => b.type === 'defense_boost')) {
-      const removeBuff = (units: BattleUnit[]) =>
-        units.map(u => u.id === currentUnit.id 
-          ? { ...u, buffs: (u.buffs || []).filter(b => b.type !== 'defense_boost') }
-          : u
-        );
+    // Remove defense buff and parry buffs from unit that just acted
+    if (currentUnit) {
+      const hasTemporaryBuffs = currentUnit.buffs?.some(b => 
+        b.type === 'defense_boost' || b.type === 'parry_phys' || b.type === 'parry_mag'
+      );
       
-      set({
-        playerUnits: removeBuff(state.playerUnits),
-        enemyUnits: removeBuff(state.enemyUnits),
-        turnOrder: removeBuff(state.turnOrder),
-      });
+      if (hasTemporaryBuffs) {
+        const removeBuff = (units: BattleUnit[]) =>
+          units.map(u => u.id === currentUnit.id 
+            ? { ...u, buffs: (u.buffs || []).filter(b => 
+                b.type !== 'defense_boost' && b.type !== 'parry_phys' && b.type !== 'parry_mag'
+              ) }
+            : u
+          );
+        
+        set({
+          playerUnits: removeBuff(state.playerUnits),
+          enemyUnits: removeBuff(state.enemyUnits),
+          turnOrder: removeBuff(state.turnOrder),
+        });
+      }
+      
+      // Restore reaction charge at start of this unit's next turn
+      if (currentUnit.reaction !== 'none' && !currentUnit.reactionAvailable) {
+        const restoreReaction = (units: BattleUnit[]) =>
+          units.map(u => u.id === currentUnit.id ? { ...u, reactionAvailable: true } : u);
+        
+        set(s => ({
+          playerUnits: restoreReaction(s.playerUnits),
+          enemyUnits: restoreReaction(s.enemyUnits),
+          turnOrder: restoreReaction(s.turnOrder),
+        }));
+      }
     }
     
     let nextIndex = state.currentUnitIndex;
@@ -375,7 +530,7 @@ export const useGameStore = create<GameState>((set, get) => ({
     });
   },
   
-  // Wait action - move unit to mirrored position in initiative
+  // Wait action
   waitAction: (unit) => {
     const state = get();
     const aliveUnits = state.turnOrder.filter(u => !u.isDead);
@@ -383,22 +538,12 @@ export const useGameStore = create<GameState>((set, get) => ({
     
     if (currentPosInAlive === -1) return;
     
-    // Calculate mirrored position: first becomes last, second becomes second-to-last, etc.
     const mirroredPos = aliveUnits.length - 1 - currentPosInAlive;
     
-    // Create new turn order with unit moved
     const newAliveOrder = [...aliveUnits];
     newAliveOrder.splice(currentPosInAlive, 1);
     newAliveOrder.splice(mirroredPos, 0, unit);
     
-    // Reconstruct full turn order (including dead units in their original positions)
-    const newTurnOrder = state.turnOrder.map(u => {
-      if (u.isDead) return u;
-      const newPos = newAliveOrder.findIndex(au => au.id === u.id);
-      return newAliveOrder[newPos] || u;
-    }).filter(u => u.isDead).concat(newAliveOrder);
-    
-    // Actually just reorder based on alive units order
     const deadUnits = state.turnOrder.filter(u => u.isDead);
     const finalTurnOrder = [...newAliveOrder, ...deadUnits];
     
@@ -408,7 +553,7 @@ export const useGameStore = create<GameState>((set, get) => ({
     get().endTurn();
   },
   
-  // Defend action - gain energy and defense buff
+  // Defend action
   defendAction: (unit) => {
     const state = get();
     
@@ -441,32 +586,25 @@ export const useGameStore = create<GameState>((set, get) => ({
     const skill = skillType === 'active' ? caster.skills.active : caster.skills.ultimate;
     const allUnits = [...state.playerUnits, ...state.enemyUnits];
     
-    // Find target at position
     const target = allUnits.find(u => 
       u.position?.q === targetPos.q && u.position?.r === targetPos.r && !u.isDead
     );
     
-    // Handle different skill types based on hero
     let result: SkillResult | null = null;
     const targets: { unit: BattleUnit; value: number }[] = [];
     
-    // Determine skill effect based on hero and skill
     if (skillType === 'ultimate' && caster.currentEnergy < (skill.energyCost || 100)) {
       return null;
     }
     
-    // Get enemies and allies based on caster
     const enemies = caster.owner === 'player' ? state.enemyUnits : state.playerUnits;
     const allies = caster.owner === 'player' ? state.playerUnits : state.enemyUnits;
     
-    // Calculate skill effects based on hero type
     switch (caster.id) {
-      // Tank skills
       case 'ironclad':
       case 'stone_giant':
       case 'paladin':
         if (skillType === 'active') {
-          // Area damage for tanks
           const areaTargets = enemies.filter(e => {
             if (!e.position || !caster.position) return false;
             return hexDistance(caster.position, e.position) <= 2 && !e.isDead;
@@ -477,13 +615,11 @@ export const useGameStore = create<GameState>((set, get) => ({
           });
           result = { type: 'area', targets, message: `${caster.avatar} использует ${skill.name}!` };
         } else {
-          // Self buff for ultimate
           targets.push({ unit: caster, value: 50 });
           result = { type: 'buff', targets, message: `${caster.avatar} активирует ${skill.name}!` };
         }
         break;
         
-      // Attack skills
       case 'shadow_blade':
       case 'berserker':
         if (skillType === 'active' && target) {
@@ -491,7 +627,6 @@ export const useGameStore = create<GameState>((set, get) => ({
           targets.push({ unit: target, value: damage });
           result = { type: 'damage', targets, message: `${caster.avatar} наносит ${skill.name}!` };
         } else if (skillType === 'ultimate') {
-          // Hit all nearby enemies
           const nearbyEnemies = enemies.filter(e => {
             if (!e.position || !caster.position) return false;
             return hexDistance(caster.position, e.position) <= 1 && !e.isDead;
@@ -506,7 +641,6 @@ export const useGameStore = create<GameState>((set, get) => ({
       case 'fire_mage':
       case 'frost_mage':
         if (target && targetPos) {
-          // Area magic damage
           const areaTargets = enemies.filter(e => {
             if (!e.position) return false;
             return hexDistance(targetPos, e.position) <= 2 && !e.isDead;
@@ -527,10 +661,8 @@ export const useGameStore = create<GameState>((set, get) => ({
         }
         break;
         
-      // Support skills
       case 'light_priestess':
         if (skillType === 'active') {
-          // Heal an ally
           const allyTarget = allies.find(a => 
             a.position?.q === targetPos.q && a.position?.r === targetPos.r && !a.isDead
           );
@@ -539,7 +671,6 @@ export const useGameStore = create<GameState>((set, get) => ({
             result = { type: 'heal', targets, message: `${caster.avatar} исцеляет ${allyTarget.name}!` };
           }
         } else {
-          // Heal all allies
           allies.filter(a => !a.isDead).forEach(a => {
             targets.push({ unit: a, value: 30 });
           });
@@ -550,7 +681,6 @@ export const useGameStore = create<GameState>((set, get) => ({
       case 'war_drummer':
       case 'shaman':
         if (skillType === 'active') {
-          // Buff allies
           const nearbyAllies = allies.filter(a => {
             if (!a.position || !caster.position) return false;
             return hexDistance(caster.position, a.position) <= 3 && !a.isDead;
@@ -574,7 +704,6 @@ export const useGameStore = create<GameState>((set, get) => ({
         break;
         
       default:
-        // Generic damage skill
         if (target) {
           const damage = Math.floor(caster.attack * (skillType === 'ultimate' ? 1.5 : 1.0));
           targets.push({ unit: target, value: damage });
@@ -584,20 +713,16 @@ export const useGameStore = create<GameState>((set, get) => ({
     
     if (!result || targets.length === 0) return null;
     
-    // Apply effects
     const updateUnit = (units: BattleUnit[], unitId: string, updates: Partial<BattleUnit>) =>
       units.map(u => u.id === unitId ? { ...u, ...updates } : u);
     
-    // Deduct energy for ultimate, active skill gives +10 energy
     let casterEnergy = caster.currentEnergy;
     if (skillType === 'ultimate') {
       casterEnergy = Math.max(0, caster.currentEnergy - (skill.energyCost || 100));
     } else {
-      // Active skill gives +10 energy
       casterEnergy = Math.min(caster.maxEnergy, caster.currentEnergy + 10);
     }
     
-    // Apply to each target
     targets.forEach(({ unit, value }) => {
       if (result!.type === 'damage' || result!.type === 'area') {
         const newHealth = Math.max(0, unit.currentHealth - value);
@@ -627,7 +752,6 @@ export const useGameStore = create<GameState>((set, get) => ({
       }
     });
     
-    // Update caster
     const casterUpdates = { hasActed: true, currentEnergy: casterEnergy };
     if (caster.owner === 'player') {
       set(s => ({ playerUnits: updateUnit(s.playerUnits, caster.id, casterUpdates) }));
