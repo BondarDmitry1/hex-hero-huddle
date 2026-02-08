@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState } from 'react';
 import { BattleUnit, hexDistance } from '@/store/gameStore';
 import { cn } from '@/lib/utils';
 
@@ -26,6 +26,13 @@ interface MeleeShakeUnit {
   unitId: string;
 }
 
+interface ReactionPopup {
+  id: string;
+  x: number;
+  y: number;
+  emoji: string;
+}
+
 interface HexGridProps {
   width: number;
   height: number;
@@ -43,6 +50,7 @@ interface HexGridProps {
   attackAnimations: AttackAnimation[];
   meleeShakeUnits?: MeleeShakeUnit[];
   isRangedBlocked?: boolean;
+  reactionPopups?: ReactionPopup[];
 }
 
 export const HexGrid = ({
@@ -62,7 +70,10 @@ export const HexGrid = ({
   attackAnimations = [],
   meleeShakeUnits = [],
   isRangedBlocked = false,
+  reactionPopups = [],
 }: HexGridProps) => {
+  const [hoveredHexKey, setHoveredHexKey] = useState<string | null>(null);
+  
   // Calculate hex size based on grid dimensions to make it visually square
   const HEX_SIZE = 36;
   const HEX_WIDTH = Math.sqrt(3) * HEX_SIZE;
@@ -114,6 +125,12 @@ export const HexGrid = ({
               if (distance === 1) {
                 forcedMeleeAttack = true;
               }
+            } else if (currentUnit.hasMoved) {
+              // Already moved - ranged attack unavailable, can only melee adjacent
+              if (distance === 1) {
+                isInAttackRange = true;
+                forcedMeleeAttack = true;
+              }
             } else {
               // Стрелок свободен - дальняя атака
               isInAttackRange = true;
@@ -125,8 +142,20 @@ export const HexGrid = ({
           }
         }
 
+        // Siege: obstacle attackable by units with siege trait
+        let isObstacleAttackable = false;
+        if (isObstacle && currentUnit && currentUnit.trait === 'siege' && currentUnit.position && !currentUnit.hasActed && !skillMode) {
+          const distance = hexDistance(currentUnit.position, { q, r });
+          if (currentUnit.attackRange === 'melee') {
+            isObstacleAttackable = distance <= currentUnit.range;
+          } else {
+            // Ranged siege: melee range always OK, ranged needs movement point
+            isObstacleAttackable = distance === 1 || !currentUnit.hasMoved;
+          }
+        }
+
         result.push({
-          q, r, x, y, key, isObstacle, isMovement, isSkillTarget, unit, isSelected, isCurrent, isInAttackRange, attackDistancePenalty, forcedMeleeAttack,
+          q, r, x, y, key, isObstacle, isMovement, isSkillTarget, unit, isSelected, isCurrent, isInAttackRange, attackDistancePenalty, forcedMeleeAttack, isObstacleAttackable,
         });
       }
     }
@@ -160,19 +189,21 @@ export const HexGrid = ({
       </defs>
 
       {/* Grid hexes */}
-      {hexes.map(({ q, r, x, y, key, isObstacle, isMovement, isSkillTarget, unit, isSelected, isCurrent, isInAttackRange, attackDistancePenalty, forcedMeleeAttack }) => (
+      {hexes.map(({ q, r, x, y, key, isObstacle, isMovement, isSkillTarget, unit, isSelected, isCurrent, isInAttackRange, attackDistancePenalty, forcedMeleeAttack, isObstacleAttackable }) => (
         <g 
           key={key} 
           onClick={() => onHexClick(q, r)}
-          onMouseEnter={() => onHexHover(q, r, unit || null)}
-          onMouseLeave={() => onHexHover(q, r, null)}
-          style={{ cursor: (isMovement || isInAttackRange || isSkillTarget) ? 'pointer' : 'default' }}
+          onMouseEnter={() => { setHoveredHexKey(key); onHexHover(q, r, unit || null); }}
+          onMouseLeave={() => { setHoveredHexKey(null); onHexHover(q, r, null); }}
+          style={{ cursor: (isMovement || isInAttackRange || isSkillTarget || isObstacleAttackable) ? 'pointer' : 'default' }}
         >
           <polygon
             points={hexPoints(x, y)}
             className={cn(
               'hex-tile',
-              isObstacle && 'hex-obstacle',
+              isObstacle && !isObstacleAttackable && 'hex-obstacle',
+              isObstacle && isObstacleAttackable && hoveredHexKey === key && 'hex-attack',
+              isObstacle && isObstacleAttackable && hoveredHexKey !== key && 'hex-obstacle',
               isSelected && 'hex-selected',
               isCurrent && !isSelected && 'hex-current',
               isMovement && !unit && !skillMode && 'hex-movement',
@@ -218,8 +249,6 @@ export const HexGrid = ({
                 {unit.avatar}
               </text>
               
-              {/* Attack indicator - static, type-based - rendered in separate layer */}
-              
               {/* Health bar */}
               <g transform={`translate(${x - 16}, ${y + HEX_SIZE * 0.65})`}>
                 <rect width={32} height={5} rx={2.5} className="fill-muted" />
@@ -262,8 +291,8 @@ export const HexGrid = ({
             >
               {(() => {
                 const hash = (q * 7 + r * 13) % 5;
-                const obstacles = ['🪨', '🌲', '🏔️', '🌳', '⛰️'];
-                return obstacles[hash];
+                const obstacleTypes = ['🪨', '🌲', '🏔️', '🌳', '⛰️'];
+                return obstacleTypes[hash];
               })()}
             </text>
           )}
@@ -271,36 +300,53 @@ export const HexGrid = ({
       ))}
       
       {/* Attack indicators layer - rendered on top to avoid overlap */}
-      {hexes.map(({ q, r, x, y, unit, isInAttackRange, attackDistancePenalty, forcedMeleeAttack }) => (
-        unit && isInAttackRange && hoveredEnemy?.id === unit.id && (
-          <g key={`attack-${q}-${r}`} style={{ pointerEvents: 'none' }}>
-            <circle
-              cx={x + HEX_SIZE * 0.7}
-              cy={y - HEX_SIZE * 0.7}
-              r={14}
-              className={cn(
-                forcedMeleeAttack ? "fill-orange-600" : "fill-destructive"
-              )}
-              filter="url(#glow)"
-            />
-            <text
-              x={x + HEX_SIZE * 0.7}
-              y={y - HEX_SIZE * 0.7 + 5}
-              textAnchor="middle"
-              className="text-sm fill-white font-bold select-none"
-            >
-              {forcedMeleeAttack ? '⚔' : attackDistancePenalty ? '🏹½' : currentUnit?.attackRange === 'melee' ? '⚔' : '🏹'}
-            </text>
-          </g>
-        )
+      {hexes.map(({ q, r, x, y, key, unit, isInAttackRange, attackDistancePenalty, forcedMeleeAttack, isObstacleAttackable }) => (
+        <g key={`indicator-${key}`}>
+          {unit && isInAttackRange && hoveredEnemy?.id === unit.id && (
+            <g style={{ pointerEvents: 'none' }}>
+              <circle
+                cx={x + HEX_SIZE * 0.7}
+                cy={y - HEX_SIZE * 0.7}
+                r={14}
+                className={cn(
+                  forcedMeleeAttack ? "fill-orange-600" : "fill-destructive"
+                )}
+                filter="url(#glow)"
+              />
+              <text
+                x={x + HEX_SIZE * 0.7}
+                y={y - HEX_SIZE * 0.7 + 5}
+                textAnchor="middle"
+                className="text-sm fill-white font-bold select-none"
+              >
+                {forcedMeleeAttack ? '⚔' : attackDistancePenalty ? '🏹½' : currentUnit?.attackRange === 'melee' ? '⚔' : '🏹'}
+              </text>
+            </g>
+          )}
+          {isObstacleAttackable && hoveredHexKey === key && (
+            <g style={{ pointerEvents: 'none' }}>
+              <circle
+                cx={x + HEX_SIZE * 0.7}
+                cy={y - HEX_SIZE * 0.7}
+                r={14}
+                className="fill-destructive"
+                filter="url(#glow)"
+              />
+              <text
+                x={x + HEX_SIZE * 0.7}
+                y={y - HEX_SIZE * 0.7 + 5}
+                textAnchor="middle"
+                className="text-sm fill-white font-bold select-none"
+              >
+                ⚔
+              </text>
+            </g>
+          )}
+        </g>
       ))}
       
       {/* Attack animations - smooth projectile */}
       {attackAnimations.map((anim) => {
-        const dx = anim.toX - anim.fromX;
-        const dy = anim.toY - anim.fromY;
-        const angle = Math.atan2(dy, dx) * (180 / Math.PI);
-        
         return (
           <g key={anim.id}>
             {anim.type === 'ranged' ? (
@@ -372,6 +418,21 @@ export const HexGrid = ({
           </text>
         </g>
       ))}
+      
+      {/* Reaction popups - floating reaction icons */}
+      {reactionPopups.map((popup) => (
+        <g key={popup.id} className="reaction-popup">
+          <text
+            x={popup.x}
+            y={popup.y}
+            textAnchor="middle"
+            className="text-2xl select-none pointer-events-none"
+            filter="url(#glow)"
+          >
+            {popup.emoji}
+          </text>
+        </g>
+      ))}
     </svg>
   );
 };
@@ -439,7 +500,7 @@ const getNeighbors = (q: number, r: number): { q: number; r: number }[] => {
   }
 };
 
-// Calculate movement range
+// Calculate movement range - blocks movement through other units, supports flight through obstacles
 export const getMovementRange = (
   unit: BattleUnit,
   units: BattleUnit[],
@@ -449,11 +510,20 @@ export const getMovementRange = (
 ): Set<string> => {
   if (!unit.position) return new Set();
   
+  const hasFlight = unit.trait === 'flight';
   const range = new Set<string>();
   const visited = new Map<string, number>();
   const queue: { q: number; r: number; distance: number }[] = [
     { q: unit.position.q, r: unit.position.r, distance: 0 },
   ];
+  
+  // Build set of occupied hexes (excluding self)
+  const occupiedSet = new Set<string>();
+  units.forEach(u => {
+    if (u.position && !u.isDead && u.id !== unit.id) {
+      occupiedSet.add(`${u.position.q},${u.position.r}`);
+    }
+  });
   
   while (queue.length > 0) {
     const current = queue.shift()!;
@@ -463,10 +533,8 @@ export const getMovementRange = (
     visited.set(key, current.distance);
     
     if (current.distance > 0 && current.distance <= unit.speed) {
-      const hasUnit = units.some(
-        u => u.position?.q === current.q && u.position?.r === current.r && !u.isDead
-      );
-      if (!hasUnit && !obstacles.has(key)) {
+      // Can only stop on empty, non-obstacle hex
+      if (!occupiedSet.has(key) && !obstacles.has(key)) {
         range.add(key);
       }
     }
@@ -475,8 +543,11 @@ export const getMovementRange = (
       const neighbors = getNeighbors(current.q, current.r);
       for (const n of neighbors) {
         const nKey = `${n.q},${n.r}`;
-        
-        if (n.q >= 0 && n.q < width && n.r >= 0 && n.r < height && !obstacles.has(nKey)) {
+        if (n.q >= 0 && n.q < width && n.r >= 0 && n.r < height) {
+          // Can't move through other units
+          if (occupiedSet.has(nKey)) continue;
+          // Can move through obstacles only with flight trait
+          if (obstacles.has(nKey) && !hasFlight) continue;
           queue.push({ q: n.q, r: n.r, distance: current.distance + 1 });
         }
       }
@@ -486,4 +557,4 @@ export const getMovementRange = (
   return range;
 };
 
-export type { DamagePopup, AttackAnimation, MeleeShakeUnit };
+export type { DamagePopup, AttackAnimation, MeleeShakeUnit, ReactionPopup };
