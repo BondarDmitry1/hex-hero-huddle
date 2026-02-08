@@ -3,7 +3,7 @@ import { useGameStore, BattleUnit, hexDistance } from '@/store/gameStore';
 import { HexGrid, generateObstacles, getMovementRange, DamagePopup, AttackAnimation, MeleeShakeUnit } from './HexGrid';
 import { SkillPanel } from './SkillPanel';
 import { cn } from '@/lib/utils';
-import { ArrowLeft, SkipForward } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 
 // Grid dimensions - 10x10 square
 const GRID_WIDTH = 10;
@@ -476,7 +476,7 @@ export const BattleArena = () => {
 
           {/* Turn order bar - moved to top */}
           <div className="flex-1 flex justify-center mx-4">
-            <div className="flex gap-1 overflow-x-auto max-w-lg">
+            <div className="flex gap-1 overflow-hidden">
               {turnOrder.filter(u => !u.isDead).map((unit, index) => (
                 <div
                   key={`${unit.id}-${index}`}
@@ -507,15 +507,6 @@ export const BattleArena = () => {
               </div>
             )}
 
-            {currentUnit?.owner === 'player' && (
-              <button
-                onClick={handleEndTurn}
-                className="fantasy-button flex items-center gap-2 py-1.5 px-3 text-sm"
-              >
-                <SkipForward className="w-4 h-4" />
-                Завершить
-              </button>
-            )}
           </div>
         </div>
       </div>
@@ -560,21 +551,20 @@ export const BattleArena = () => {
           
           {/* Bottom - Active hero skills (always visible, aligned with grid) */}
           <div className="flex-shrink-0 bg-card border-t border-border">
-            <div className="flex justify-center py-3">
-              {currentUnit ? (
-                <SkillPanel 
-                  unit={currentUnit} 
-                  onUseSkill={currentUnit.owner === 'player' ? handleUseSkill : () => {}} 
-                  onWait={currentUnit.owner === 'player' ? handleWait : undefined}
-                  onDefend={currentUnit.owner === 'player' ? handleDefend : undefined}
-                  skillMode={skillMode} 
-                  isCompact 
-                  isViewOnly={currentUnit.owner !== 'player'}
-                />
-              ) : (
-                <div className="text-muted-foreground text-sm py-4">Загрузка...</div>
-              )}
-            </div>
+            {currentUnit ? (
+              <SkillPanel 
+                unit={currentUnit} 
+                onUseSkill={currentUnit.owner === 'player' ? handleUseSkill : () => {}} 
+                onWait={currentUnit.owner === 'player' ? handleWait : undefined}
+                onDefend={currentUnit.owner === 'player' ? handleDefend : undefined}
+                onEndTurn={currentUnit.owner === 'player' ? handleEndTurn : undefined}
+                skillMode={skillMode} 
+                isCompact 
+                isViewOnly={currentUnit.owner !== 'player'}
+              />
+            ) : (
+              <div className="text-muted-foreground text-sm py-4 text-center">Загрузка...</div>
+            )}
           </div>
         </div>
 

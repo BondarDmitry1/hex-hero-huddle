@@ -3,7 +3,7 @@ export type DamageType = 'physical' | 'magical';
 export type AttackRange = 'melee' | 'ranged';
 
 export type HeroTrait = 'flight' | 'siege' | 'no_melee_penalty' | 'ignores_reactions' | 'none';
-export type HeroReaction = 'counterattack' | 'return_shot' | 'retreat' | 'parry' | 'none';
+export type HeroReaction = 'counterattack' | 'return_shot' | 'retreat' | 'parry' | 'provoked_attack' | 'none';
 
 export const traitLabels: Record<HeroTrait, string> = {
   flight: 'Полёт',
@@ -26,6 +26,7 @@ export const reactionLabels: Record<HeroReaction, string> = {
   return_shot: 'Ответный выстрел',
   retreat: 'Отход',
   parry: 'Парирование',
+  provoked_attack: 'Спровоцированная атака',
   none: 'Нет',
 };
 
@@ -34,6 +35,7 @@ export const reactionDescriptions: Record<HeroReaction, string> = {
   return_shot: 'При атаке дальнего боя автоматически производит ответный выстрел',
   retreat: 'При атаке ближнего боя отходит на одну клетку назад от атакующего',
   parry: 'С шансом 50% получает +2 к защите того типа, каким была атака (до начала следующего хода)',
+  provoked_attack: 'Когда стоит вплотную к врагу и тот отходит на дистанцию >1, автоматически атакует его (не срабатывает на Отход)',
   none: 'Нет реакции',
 };
 
@@ -225,7 +227,7 @@ export const heroes: Hero[] = [
     energy: 0,
     maxEnergy: 80,
     trait: 'ignores_reactions',
-    reaction: 'retreat',
+    reaction: 'provoked_attack',
     skills: {
       passive: {
         id: 'backstab',
