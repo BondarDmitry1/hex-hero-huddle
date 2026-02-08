@@ -51,8 +51,9 @@ interface GameState {
   initializeBattle: () => void;
   setSelectedUnit: (unit: BattleUnit | null) => void;
   setHoveredUnit: (unit: BattleUnit | null) => void;
-  moveUnit: (unit: BattleUnit, position: { q: number; r: number }) => void;
-  attackUnit: (attacker: BattleUnit, target: BattleUnit) => { damage: number; isCrit: boolean };
+  moveUnit: (unit: BattleUnit, position: { q: number; r: number }) => { provokedAttack?: { attackerId: string; damage: number; attackerPos: { q: number; r: number }; targetPos: { q: number; r: number } } };
+  attackUnit: (attacker: BattleUnit, target: BattleUnit) => { damage: number; isCrit: boolean; reaction?: { type: string; reactorId: string; damage?: number; isMelee?: boolean; reactorPos?: { q: number; r: number }; targetPos?: { q: number; r: number } } };
+  markUnitActed: (unitId: string, alsoMoved?: boolean) => void;
   useSkill: (caster: BattleUnit, targetPos: { q: number; r: number }, skillType: 'active' | 'ultimate') => SkillResult | null;
   endTurn: () => void;
   
@@ -224,6 +225,8 @@ export const useGameStore = create<GameState>((set, get) => ({
   setHoveredUnit: (unit) => set({ hoveredUnit: unit }),
   
   moveUnit: (unit, position) => {
+    let provokedResult: { attackerId: string; damage: number; attackerPos: { q: number; r: number }; targetPos: { q: number; r: number } } | undefined;
+    
     // Check for provoked attacks (Спровоцированная атака) before moving
     if (unit.position) {
       const preState = get();
@@ -241,6 +244,13 @@ export const useGameStore = create<GameState>((set, get) => ({
           const newHealth = Math.max(0, unit.currentHealth - damage);
           const isDead = newHealth === 0;
           const provokerEnergy = Math.min(provoker.maxEnergy, provoker.currentEnergy + 5);
+          
+          provokedResult = {
+            attackerId: provoker.id,
+            damage,
+            attackerPos: { ...provoker.position! },
+            targetPos: { ...unit.position! },
+          };
           
           const updateU = (units: BattleUnit[], unitId: string, updates: Partial<BattleUnit>) =>
             units.map(u => u.id === unitId ? { ...u, ...updates } : u);
@@ -261,7 +271,7 @@ export const useGameStore = create<GameState>((set, get) => ({
           
           get().addBattleLog(`⚔️ ${provoker.avatar} спровоцированная атака: ${damage} урона по ${unit.avatar}${isDead ? ` ☠️ ${unit.name} повержен!` : ''}`);
           
-          if (isDead) return;
+          if (isDead) return { provokedAttack: provokedResult };
           break;
         }
       }
@@ -289,6 +299,8 @@ export const useGameStore = create<GameState>((set, get) => ({
       turnOrder: updatedTurnOrder,
       selectedUnit: updatedSelectedUnit,
     });
+    
+    return { provokedAttack: provokedResult };
   },
   
   attackUnit: (attacker, target) => {
@@ -368,7 +380,12 @@ export const useGameStore = create<GameState>((set, get) => ({
     const updateUnit = (units: BattleUnit[], unitId: string, updates: Partial<BattleUnit>) =>
       units.map(u => u.id === unitId ? { ...u, ...updates } : u);
     
-    const attackerUpdates = { hasActed: true, currentEnergy: attackerEnergy };
+    const isRangedNonMelee = attacker.attackRange === 'ranged' && !forcedMelee;
+    const attackerUpdates: Partial<BattleUnit> = { 
+      hasActed: true, 
+      currentEnergy: attackerEnergy,
+      ...(isRangedNonMelee ? { hasMoved: true } : {}),
+    };
     if (attacker.owner === 'player') {
       set({ playerUnits: updateUnit(state.playerUnits, attacker.id, attackerUpdates) });
     } else {
@@ -376,6 +393,8 @@ export const useGameStore = create<GameState>((set, get) => ({
     }
     
     const targetUpdates: Partial<BattleUnit> = { currentHealth: newHealth, currentEnergy: targetEnergy, isDead };
+    
+    let reactionResult: { type: string; reactorId: string; damage?: number; isMelee?: boolean; reactorPos?: { q: number; r: number }; targetPos?: { q: number; r: number } } | undefined;
     
     // Process reactions (if target has reaction available and attacker doesn't ignore reactions)
     if (!isDead && target.reactionAvailable && target.reaction !== 'none' && attacker.trait !== 'ignores_reactions') {
@@ -394,7 +413,6 @@ export const useGameStore = create<GameState>((set, get) => ({
             const newAttackerHealth = Math.max(0, attacker.currentHealth - counterDamage);
             const attackerDead = newAttackerHealth === 0;
             
-            // Update attacker with counter damage
             const counterUpdates = { ...attackerUpdates, currentHealth: newAttackerHealth, isDead: attackerDead };
             if (attacker.owner === 'player') {
               set(s => ({ playerUnits: updateUnit(s.playerUnits, attacker.id, counterUpdates) }));
@@ -406,6 +424,7 @@ export const useGameStore = create<GameState>((set, get) => ({
             targetUpdates.reactionAvailable = false;
             targetUpdates.currentEnergy = Math.min(target.maxEnergy, targetEnergy + 5);
             get().addBattleLog(`⚔️ ${target.avatar} контрудар: ${counterDamage} урона${attackerDead ? ` ☠️ ${attacker.name} повержен!` : ''}`);
+            reactionResult = { type: 'counterattack', reactorId: target.id, damage: counterDamage, isMelee: true, reactorPos: target.position ? { ...target.position } : undefined, targetPos: attacker.position ? { ...attacker.position } : undefined };
           }
           break;
         }
@@ -432,6 +451,7 @@ export const useGameStore = create<GameState>((set, get) => ({
             targetUpdates.reactionAvailable = false;
             targetUpdates.currentEnergy = Math.min(target.maxEnergy, targetEnergy + 5);
             get().addBattleLog(`🏹 ${target.avatar} ответный выстрел: ${shotDamage} урона${attackerDead ? ` ☠️ ${attacker.name} повержен!` : ''}`);
+            reactionResult = { type: 'return_shot', reactorId: target.id, damage: shotDamage, isMelee: false, reactorPos: target.position ? { ...target.position } : undefined, targetPos: attacker.position ? { ...attacker.position } : undefined };
           }
           break;
         }
@@ -471,6 +491,7 @@ export const useGameStore = create<GameState>((set, get) => ({
               targetUpdates.reactionAvailable = false;
               targetUpdates.currentEnergy = Math.min(target.maxEnergy, targetEnergy + 5);
               get().addBattleLog(`🏃 ${target.avatar} отходит!`);
+              reactionResult = { type: 'retreat', reactorId: target.id, reactorPos: target.position ? { ...target.position } : undefined };
             }
           }
           break;
@@ -490,6 +511,7 @@ export const useGameStore = create<GameState>((set, get) => ({
             
             const defLabel = defenseType === 'physical' ? 'физ.' : 'маг.';
             get().addBattleLog(`🤺 ${target.avatar} парирование! +2 ${defLabel} защиты`);
+            reactionResult = { type: 'parry', reactorId: target.id, reactorPos: target.position ? { ...target.position } : undefined };
           }
           break;
         }
@@ -525,7 +547,7 @@ export const useGameStore = create<GameState>((set, get) => ({
     const killText = isDead ? ` ☠️ ${target.name} повержен!` : '';
     get().addBattleLog(`${attacker.avatar} → ${target.avatar}: ${damage} урона${critText}${distanceText}${killText}`);
     
-    return { damage, isCrit };
+    return { damage, isCrit, reaction: reactionResult };
   },
   
   endTurn: () => {
@@ -644,6 +666,24 @@ export const useGameStore = create<GameState>((set, get) => ({
     });
     
     get().addBattleLog(`🛡️ ${unit.avatar} ${unit.name} принимает оборонительную стойку (+10⚡, +1🛡️)`);
+  },
+  
+  markUnitActed: (unitId, alsoMoved) => {
+    const state = get();
+    const updates: Partial<BattleUnit> = { hasActed: true };
+    if (alsoMoved) updates.hasMoved = true;
+    
+    const updateUnit = (units: BattleUnit[]) =>
+      units.map(u => u.id === unitId ? { ...u, ...updates } : u);
+    
+    set({
+      playerUnits: updateUnit(state.playerUnits),
+      enemyUnits: updateUnit(state.enemyUnits),
+      turnOrder: updateUnit(state.turnOrder),
+      selectedUnit: state.selectedUnit?.id === unitId 
+        ? { ...state.selectedUnit, ...updates } 
+        : state.selectedUnit,
+    });
   },
   
   useSkill: (caster, targetPos, skillType) => {

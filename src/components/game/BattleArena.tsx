@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useGameStore, BattleUnit, hexDistance } from '@/store/gameStore';
-import { HexGrid, generateObstacles, getMovementRange, DamagePopup, AttackAnimation, MeleeShakeUnit } from './HexGrid';
+import { HexGrid, generateObstacles, getMovementRange, DamagePopup, AttackAnimation, MeleeShakeUnit, ReactionPopup } from './HexGrid';
 import { SkillPanel } from './SkillPanel';
 import { cn } from '@/lib/utils';
 import { ArrowLeft } from 'lucide-react';
@@ -31,12 +31,14 @@ export const BattleArena = () => {
     setSkillMode,
     skillRange,
     setSkillRange,
+    markUnitActed,
   } = useGameStore();
 
-  const [obstacles] = useState(() => generateObstacles(GRID_WIDTH, GRID_HEIGHT));
+  const [obstacles, setObstacles] = useState(() => generateObstacles(GRID_WIDTH, GRID_HEIGHT));
   const [damagePopups, setDamagePopups] = useState<DamagePopup[]>([]);
   const [attackAnimations, setAttackAnimations] = useState<AttackAnimation[]>([]);
   const [meleeShakeUnits, setMeleeShakeUnits] = useState<MeleeShakeUnit[]>([]);
+  const [reactionPopups, setReactionPopups] = useState<ReactionPopup[]>([]);
   const popupIdRef = useRef(0);
   
   const allUnits = useMemo(() => [...playerUnits, ...enemyUnits], [playerUnits, enemyUnits]);
@@ -69,7 +71,6 @@ export const BattleArena = () => {
     const HEX_SIZE = 36;
     const HEX_WIDTH = Math.sqrt(3) * HEX_SIZE;
     const HEX_HEIGHT = 2 * HEX_SIZE;
-    // Match HexGrid: offset rows for staggered alignment
     const offset = r % 2 === 0 ? 0 : HEX_WIDTH / 2;
     const x = q * HEX_WIDTH + offset + HEX_WIDTH;
     const y = r * HEX_HEIGHT * 0.75 + HEX_HEIGHT;
@@ -113,10 +114,8 @@ export const BattleArena = () => {
     const to = hexToPixel(target.position.q, target.position.r);
     const id = `attack-${popupIdRef.current++}`;
     
-    // Determine attack type (melee or ranged)
     const isMeleeAttack = attacker.attackRange === 'melee' || isForcedMelee;
     
-    // Choose emoji based on attack type
     let emoji = '💥';
     if (!isMeleeAttack) {
       if (attacker.attackType === 'magical') {
@@ -129,7 +128,6 @@ export const BattleArena = () => {
       }
     }
     
-    // Shake attacker on melee attack
     if (isMeleeAttack) {
       showMeleeShake(attacker.id);
     }
@@ -149,6 +147,72 @@ export const BattleArena = () => {
       onComplete();
     }, 350);
   }, [hexToPixel, showMeleeShake]);
+
+  // Show reaction popup (icon floating up from hero center)
+  const showReactionPopup = useCallback((pos: { q: number; r: number }, emoji: string) => {
+    const { x, y } = hexToPixel(pos.q, pos.r);
+    const id = `reaction-${popupIdRef.current++}`;
+    setReactionPopups(prev => [...prev, { id, x, y, emoji }]);
+    setTimeout(() => {
+      setReactionPopups(prev => prev.filter(p => p.id !== id));
+    }, 1000);
+  }, [hexToPixel]);
+
+  // Helper for reaction attack animation (counterattack, return shot, provoked attack)
+  const showReactionAttackAnimation = useCallback((
+    fromPos: { q: number; r: number },
+    toPos: { q: number; r: number },
+    isMelee: boolean,
+    attackerId: string,
+    damage: number
+  ) => {
+    const from = hexToPixel(fromPos.q, fromPos.r);
+    const to = hexToPixel(toPos.q, toPos.r);
+    const id = `reaction-atk-${popupIdRef.current++}`;
+    const emoji = isMelee ? '💥' : '🏹';
+    
+    if (isMelee) showMeleeShake(attackerId);
+    
+    setAttackAnimations(prev => [...prev, {
+      id, fromX: from.x, fromY: from.y, toX: to.x, toY: to.y,
+      type: isMelee ? 'melee' : 'ranged', emoji,
+    }]);
+    
+    setTimeout(() => {
+      setAttackAnimations(prev => prev.filter(a => a.id !== id));
+      showDamagePopup(toPos, damage, false, false);
+    }, 350);
+  }, [hexToPixel, showMeleeShake, showDamagePopup]);
+
+  // Handle reaction animation from attack result
+  const handleReactionAnimation = useCallback((reaction: { type: string; reactorId: string; damage?: number; isMelee?: boolean; reactorPos?: { q: number; r: number }; targetPos?: { q: number; r: number } }) => {
+    const reactionEmojis: Record<string, string> = {
+      counterattack: '⚔️', return_shot: '🏹', retreat: '🏃', parry: '🛡️',
+    };
+    const emoji = reactionEmojis[reaction.type] || '🔄';
+    
+    if (reaction.reactorPos) {
+      showReactionPopup(reaction.reactorPos, emoji);
+    }
+    
+    if (reaction.damage && reaction.reactorPos && reaction.targetPos) {
+      setTimeout(() => {
+        showReactionAttackAnimation(
+          reaction.reactorPos!, reaction.targetPos!,
+          !!reaction.isMelee, reaction.reactorId, reaction.damage!
+        );
+      }, 500);
+    }
+  }, [showReactionPopup, showReactionAttackAnimation]);
+
+  // Handle provoked attack animation from move result
+  const handleProvokedAnimation = useCallback((provokedAttack: { attackerId: string; damage: number; attackerPos: { q: number; r: number }; targetPos: { q: number; r: number } }) => {
+    showReactionPopup(provokedAttack.attackerPos, '⚔️');
+    showReactionAttackAnimation(
+      provokedAttack.attackerPos, provokedAttack.targetPos,
+      true, provokedAttack.attackerId, provokedAttack.damage
+    );
+  }, [showReactionPopup, showReactionAttackAnimation]);
 
   // Auto-select current unit
   useEffect(() => {
@@ -177,12 +241,16 @@ export const BattleArena = () => {
             if (enemyIsBlocked) {
               return distance === 1;
             }
+            // Ranged needs movement point for ranged attacks
+            if (currentUnit.hasMoved) {
+              return distance === 1; // can only melee adjacent
+            }
             return true;
           });
           
           if (targets.length > 0) {
             const target = targets.sort((a, b) => a.currentHealth - b.currentHealth)[0];
-            const isForcedMelee = enemyIsBlocked && target.position && 
+            const isForcedMelee = (enemyIsBlocked || currentUnit.hasMoved) && target.position && 
               hexDistance(currentUnit.position!, target.position) === 1;
             
             showAttackAnimation(currentUnit, target, () => {
@@ -190,11 +258,19 @@ export const BattleArena = () => {
               if (target.position) {
                 showDamagePopup(target.position, result.damage, result.isCrit, false);
               }
-            }, isForcedMelee);
+              // Handle reaction animation
+              if (result.reaction) {
+                handleReactionAnimation(result.reaction);
+              }
+            }, !!isForcedMelee);
             
             setTimeout(() => {
-              if (!currentUnit.hasMoved) {
-                const range = getMovementRange(currentUnit, allUnits, obstacles, GRID_WIDTH, GRID_HEIGHT);
+              // Use fresh state to check if can still move (ranged attack consumes movement)
+              const freshState = useGameStore.getState();
+              const freshUnit = freshState.turnOrder[freshState.currentUnitIndex];
+              if (freshUnit && !freshUnit.hasMoved) {
+                const freshAllUnits = [...freshState.playerUnits, ...freshState.enemyUnits];
+                const range = getMovementRange(freshUnit, freshAllUnits, obstacles, GRID_WIDTH, GRID_HEIGHT);
                 if (range.size > 0) {
                   const rangeArray = Array.from(range);
                   let bestPos = rangeArray[0];
@@ -214,7 +290,10 @@ export const BattleArena = () => {
                   }
                   
                   const [q, r] = bestPos.split(',').map(Number);
-                  moveUnit(currentUnit, { q, r });
+                  const moveResult = moveUnit(freshUnit, { q, r });
+                  if (moveResult?.provokedAttack) {
+                    handleProvokedAnimation(moveResult.provokedAttack);
+                  }
                 }
               }
               
@@ -246,7 +325,10 @@ export const BattleArena = () => {
             }
             
             const [q, r] = bestPos.split(',').map(Number);
-            moveUnit(currentUnit, { q, r });
+            const moveResult = moveUnit(currentUnit, { q, r });
+            if (moveResult?.provokedAttack) {
+              handleProvokedAnimation(moveResult.provokedAttack);
+            }
           }
         }
         
@@ -255,7 +337,7 @@ export const BattleArena = () => {
       
       return () => clearTimeout(timer);
     }
-  }, [currentUnit, allUnits, obstacles, moveUnit, endTurn, attackUnit, alivePlayerUnits, gameOver, showAttackAnimation, showDamagePopup]);
+  }, [currentUnit, allUnits, obstacles, moveUnit, endTurn, attackUnit, alivePlayerUnits, gameOver, showAttackAnimation, showDamagePopup, handleReactionAnimation, handleProvokedAnimation]);
 
   const handleHexClick = useCallback((q: number, r: number) => {
     if (!currentUnit || currentUnit.owner !== 'player' || gameOver) return;
@@ -315,23 +397,69 @@ export const BattleArena = () => {
       return;
     }
     
+    // Siege attack on obstacle
+    if (obstacles.has(key) && currentUnit.trait === 'siege' && !currentUnit.hasActed && currentUnit.position) {
+      const distance = hexDistance(currentUnit.position, { q, r });
+      let canAttackObstacle = false;
+      let needsMovementPoint = false;
+      
+      if (currentUnit.attackRange === 'melee') {
+        canAttackObstacle = distance <= currentUnit.range;
+      } else {
+        if (distance === 1) {
+          canAttackObstacle = true;
+        } else if (!currentUnit.hasMoved) {
+          canAttackObstacle = true;
+          needsMovementPoint = true;
+        }
+      }
+      
+      if (canAttackObstacle) {
+        const isMelee = currentUnit.attackRange === 'melee' || distance === 1;
+        const from = hexToPixel(currentUnit.position.q, currentUnit.position.r);
+        const to = hexToPixel(q, r);
+        const animId = `siege-${popupIdRef.current++}`;
+        
+        if (isMelee) showMeleeShake(currentUnit.id);
+        
+        setAttackAnimations(prev => [...prev, {
+          id: animId, fromX: from.x, fromY: from.y, toX: to.x, toY: to.y,
+          type: isMelee ? 'melee' : 'ranged', emoji: isMelee ? '💥' : '🏹',
+        }]);
+        
+        setTimeout(() => {
+          setAttackAnimations(prev => prev.filter(a => a.id !== animId));
+          setObstacles(prev => {
+            const next = new Set(prev);
+            next.delete(key);
+            return next;
+          });
+          markUnitActed(currentUnit.id, needsMovementPoint);
+        }, 350);
+        return;
+      }
+    }
+    
     // Attack enemy
     if (clickedUnit && clickedUnit.owner === 'enemy' && !currentUnit.hasActed && currentUnit.position) {
       const distance = hexDistance(currentUnit.position, { q, r });
       
-      // Для мили - проверяем дальность
-      // Для стрелков: если заблокированы, могут атаковать только вплотную
       let canAttack = false;
       let isForcedMelee = false;
       
       if (currentUnit.attackRange === 'melee') {
         canAttack = distance <= currentUnit.range;
       } else {
-        // Стрелок
         if (isRangedBlocked) {
           // Заблокирован - только ближний бой
           canAttack = distance === 1;
           isForcedMelee = true;
+        } else if (currentUnit.hasMoved) {
+          // Already moved - can only melee adjacent
+          if (distance === 1) {
+            canAttack = true;
+            isForcedMelee = true;
+          }
         } else {
           // Свободен - дальняя атака
           canAttack = true;
@@ -342,6 +470,11 @@ export const BattleArena = () => {
         showAttackAnimation(currentUnit, clickedUnit, () => {
           const result = attackUnit(currentUnit, clickedUnit);
           showDamagePopup({ q, r }, result.damage, result.isCrit, false);
+          
+          // Handle reaction animation
+          if (result.reaction) {
+            handleReactionAnimation(result.reaction);
+          }
         }, isForcedMelee);
         return;
       }
@@ -355,9 +488,14 @@ export const BattleArena = () => {
 
     // Move to valid hex
     if (selectedUnit && !selectedUnit.hasMoved && movementRange.has(key) && currentUnit.id === selectedUnit.id) {
-      moveUnit(selectedUnit, { q, r });
+      const moveResult = moveUnit(selectedUnit, { q, r });
+      
+      // Show provoked attack animation
+      if (moveResult?.provokedAttack) {
+        handleProvokedAnimation(moveResult.provokedAttack);
+      }
     }
-  }, [currentUnit, allUnits, selectedUnit, movementRange, moveUnit, attackUnit, setSelectedUnit, gameOver, showAttackAnimation, showDamagePopup, skillMode, skillRange, setSkillMode, setSkillRange, useSkill, hexToPixel, isRangedBlocked]);
+  }, [currentUnit, allUnits, selectedUnit, movementRange, moveUnit, attackUnit, setSelectedUnit, gameOver, showAttackAnimation, showDamagePopup, skillMode, skillRange, setSkillMode, setSkillRange, useSkill, hexToPixel, isRangedBlocked, obstacles, markUnitActed, handleReactionAnimation, handleProvokedAnimation, showMeleeShake]);
 
   const handleHexHover = useCallback((q: number, r: number, unit: BattleUnit | null) => {
     // Set hovered unit for showing info panel on right
@@ -394,9 +532,7 @@ export const BattleArena = () => {
       const isSupport = currentUnit.role === 'support';
       const isSelfBuff = ['ironclad', 'stone_giant', 'paladin', 'berserker'].includes(currentUnit.id);
       
-      // Different range logic for different skills
       if (isSupport && skillType === 'active' && currentUnit.id === 'light_priestess') {
-        // Healer can target allies
         playerUnits.filter(u => !u.isDead && u.position).forEach(u => {
           if (u.position) {
             const dist = hexDistance(currentUnit.position!, u.position);
@@ -406,15 +542,13 @@ export const BattleArena = () => {
           }
         });
       } else if (isSelfBuff && skillType === 'ultimate') {
-        // Self-targeting
         newRange.add(`${currentUnit.position.q},${currentUnit.position.r}`);
       } else {
-        // Default: target enemies
-        const skillRange = skillType === 'ultimate' ? 6 : (currentUnit.attackRange === 'ranged' ? 5 : 2);
+        const skillRangeVal = skillType === 'ultimate' ? 6 : (currentUnit.attackRange === 'ranged' ? 5 : 2);
         enemyUnits.filter(u => !u.isDead && u.position).forEach(u => {
           if (u.position) {
             const dist = hexDistance(currentUnit.position!, u.position);
-            if (dist <= skillRange) {
+            if (dist <= skillRangeVal) {
               newRange.add(`${u.position.q},${u.position.r}`);
             }
           }
@@ -474,7 +608,7 @@ export const BattleArena = () => {
             <h1 className="text-lg font-display font-bold text-primary">Арена Битвы</h1>
           </div>
 
-          {/* Turn order bar - moved to top */}
+          {/* Turn order bar */}
           <div className="flex-1 flex justify-center mx-4">
             <div className="flex gap-1 overflow-hidden">
               {turnOrder.filter(u => !u.isDead).map((unit, index) => (
@@ -506,7 +640,6 @@ export const BattleArena = () => {
                 <span className="font-display">{currentUnit.name}</span>
               </div>
             )}
-
           </div>
         </div>
       </div>
@@ -546,10 +679,11 @@ export const BattleArena = () => {
               attackAnimations={attackAnimations}
               meleeShakeUnits={meleeShakeUnits}
               isRangedBlocked={isRangedBlocked}
+              reactionPopups={reactionPopups}
             />
           </div>
           
-          {/* Bottom - Active hero skills (always visible, aligned with grid) */}
+          {/* Bottom - Active hero skills */}
           <div className="flex-shrink-0 bg-card border-t border-border">
             {currentUnit ? (
               <SkillPanel 
