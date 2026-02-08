@@ -224,6 +224,50 @@ export const useGameStore = create<GameState>((set, get) => ({
   setHoveredUnit: (unit) => set({ hoveredUnit: unit }),
   
   moveUnit: (unit, position) => {
+    // Check for provoked attacks (Спровоцированная атака) before moving
+    if (unit.position) {
+      const preState = get();
+      const enemies = unit.owner === 'player' ? preState.enemyUnits : preState.playerUnits;
+      const provokers = enemies.filter(e => 
+        !e.isDead && e.position && e.reactionAvailable && 
+        e.reaction === 'provoked_attack' &&
+        hexDistance(unit.position!, e.position) === 1
+      );
+      
+      for (const provoker of provokers) {
+        const newDist = hexDistance(position, provoker.position!);
+        if (newDist > 1) {
+          const damage = calculateDamage(provoker.attack, provoker.attackType, unit.physicalDefense, unit.magicalDefense);
+          const newHealth = Math.max(0, unit.currentHealth - damage);
+          const isDead = newHealth === 0;
+          const provokerEnergy = Math.min(provoker.maxEnergy, provoker.currentEnergy + 5);
+          
+          const updateU = (units: BattleUnit[], unitId: string, updates: Partial<BattleUnit>) =>
+            units.map(u => u.id === unitId ? { ...u, ...updates } : u);
+          
+          const provokerUpdates = { reactionAvailable: false, currentEnergy: provokerEnergy };
+          set(s => ({
+            playerUnits: updateU(s.playerUnits, provoker.id, provokerUpdates),
+            enemyUnits: updateU(s.enemyUnits, provoker.id, provokerUpdates),
+            turnOrder: updateU(s.turnOrder, provoker.id, provokerUpdates),
+          }));
+          
+          const unitDmgUpdates: Partial<BattleUnit> = { currentHealth: newHealth, isDead };
+          set(s => ({
+            playerUnits: updateU(s.playerUnits, unit.id, unitDmgUpdates),
+            enemyUnits: updateU(s.enemyUnits, unit.id, unitDmgUpdates),
+            turnOrder: updateU(s.turnOrder, unit.id, unitDmgUpdates),
+          }));
+          
+          get().addBattleLog(`⚔️ ${provoker.avatar} спровоцированная атака: ${damage} урона по ${unit.avatar}${isDead ? ` ☠️ ${unit.name} повержен!` : ''}`);
+          
+          if (isDead) return;
+          break;
+        }
+      }
+    }
+    
+    // Perform the actual move
     const state = get();
     const updateUnits = (units: BattleUnit[]) =>
       units.map(u => u.id === unit.id ? { ...u, position, hasMoved: true } : u);
@@ -269,6 +313,7 @@ export const useGameStore = create<GameState>((set, get) => ({
     
     // Ranged penalties
     let forcedMelee = false;
+    let hasDamagePenalty = false;
     if (attacker.attackRange === 'ranged') {
       const allEnemyUnits = attacker.owner === 'player' ? state.enemyUnits : state.playerUnits;
       const isBlocked = allEnemyUnits.some(e => {
@@ -278,9 +323,9 @@ export const useGameStore = create<GameState>((set, get) => ({
       
       if (isBlocked) {
         if (distance === 1) {
-          // Check for no_melee_penalty trait
           if (attacker.trait !== 'no_melee_penalty') {
             damage = Math.floor(damage / 3);
+            hasDamagePenalty = true;
           }
           forcedMelee = true;
         } else {
@@ -288,6 +333,7 @@ export const useGameStore = create<GameState>((set, get) => ({
         }
       } else if (distance > attacker.range) {
         damage = Math.floor(damage / 2);
+        hasDamagePenalty = true;
       }
     }
     
@@ -300,9 +346,24 @@ export const useGameStore = create<GameState>((set, get) => ({
     const isDead = newHealth === 0;
     
     const isMeleeAttack = attacker.attackRange === 'melee' || forcedMelee;
-    const attackerEnergyGain = isMeleeAttack ? 15 : 10;
+    
+    // Energy economy based on attack type and penalties
+    let attackerEnergyGain: number;
+    let targetEnergyGain: number;
+    if (hasDamagePenalty) {
+      attackerEnergyGain = 5;
+      targetEnergyGain = 10;
+    } else if (isMeleeAttack) {
+      attackerEnergyGain = 15;
+      targetEnergyGain = 20;
+    } else {
+      // Ranged, no penalty
+      attackerEnergyGain = 10;
+      targetEnergyGain = 15;
+    }
+    
     const attackerEnergy = Math.min(attacker.maxEnergy, attacker.currentEnergy + attackerEnergyGain);
-    const targetEnergy = isDead ? 0 : Math.min(target.maxEnergy, target.currentEnergy + 20);
+    const targetEnergy = isDead ? 0 : Math.min(target.maxEnergy, target.currentEnergy + targetEnergyGain);
     
     const updateUnit = (units: BattleUnit[], unitId: string, updates: Partial<BattleUnit>) =>
       units.map(u => u.id === unitId ? { ...u, ...updates } : u);
@@ -343,6 +404,7 @@ export const useGameStore = create<GameState>((set, get) => ({
             set(s => ({ turnOrder: updateUnit(s.turnOrder, attacker.id, counterUpdates) }));
             
             targetUpdates.reactionAvailable = false;
+            targetUpdates.currentEnergy = Math.min(target.maxEnergy, targetEnergy + 5);
             get().addBattleLog(`⚔️ ${target.avatar} контрудар: ${counterDamage} урона${attackerDead ? ` ☠️ ${attacker.name} повержен!` : ''}`);
           }
           break;
@@ -368,6 +430,7 @@ export const useGameStore = create<GameState>((set, get) => ({
             set(s => ({ turnOrder: updateUnit(s.turnOrder, attacker.id, shotUpdates) }));
             
             targetUpdates.reactionAvailable = false;
+            targetUpdates.currentEnergy = Math.min(target.maxEnergy, targetEnergy + 5);
             get().addBattleLog(`🏹 ${target.avatar} ответный выстрел: ${shotDamage} урона${attackerDead ? ` ☠️ ${attacker.name} повержен!` : ''}`);
           }
           break;
@@ -406,6 +469,7 @@ export const useGameStore = create<GameState>((set, get) => ({
             if (retreatPos) {
               targetUpdates.position = retreatPos;
               targetUpdates.reactionAvailable = false;
+              targetUpdates.currentEnergy = Math.min(target.maxEnergy, targetEnergy + 5);
               get().addBattleLog(`🏃 ${target.avatar} отходит!`);
             }
           }
@@ -422,6 +486,7 @@ export const useGameStore = create<GameState>((set, get) => ({
             };
             targetUpdates.buffs = [...(target.buffs || []), parryBuff];
             targetUpdates.reactionAvailable = false;
+            targetUpdates.currentEnergy = Math.min(target.maxEnergy, targetEnergy + 5);
             
             const defLabel = defenseType === 'physical' ? 'физ.' : 'маг.';
             get().addBattleLog(`🤺 ${target.avatar} парирование! +2 ${defLabel} защиты`);

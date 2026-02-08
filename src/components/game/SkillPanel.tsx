@@ -3,7 +3,7 @@ import { traitLabels, traitDescriptions, reactionLabels, reactionDescriptions } 
 import { cn } from '@/lib/utils';
 import { 
   Zap, Target, Shield, Footprints, Hand, Swords, Sparkles, 
-  Wind, Heart, Gauge, Clock, ShieldPlus, Eye, RefreshCcw
+  Wind, Heart, Gauge, Clock, ShieldPlus, Eye, RefreshCcw, SkipForward
 } from 'lucide-react';
 import {
   Tooltip,
@@ -18,6 +18,7 @@ interface SkillPanelProps {
   onUseSkill: (skillType: 'active' | 'ultimate') => void;
   onWait?: () => void;
   onDefend?: () => void;
+  onEndTurn?: () => void;
   skillMode?: SkillMode;
   isViewOnly?: boolean;
   isCompact?: boolean;
@@ -28,6 +29,7 @@ export const SkillPanel = ({
   onUseSkill, 
   onWait,
   onDefend,
+  onEndTurn,
   skillMode, 
   isViewOnly = false, 
   isCompact = false 
@@ -68,10 +70,10 @@ export const SkillPanel = ({
           {/* Hero avatar & name - fixed width to prevent jitter */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className="flex items-center gap-2 cursor-default w-[110px] flex-shrink-0">
+              <div className="flex items-center gap-2 cursor-default flex-shrink-0">
                 <span className="text-3xl">{unit.avatar}</span>
                 <div className="min-w-0">
-                  <h3 className="font-display font-bold text-foreground text-sm leading-tight truncate">{unit.name}</h3>
+                  <h3 className="font-display font-bold text-foreground text-sm leading-tight whitespace-nowrap">{unit.name}</h3>
                   <p className="text-[9px] text-muted-foreground truncate">{unit.title || 'Герой'}</p>
                 </div>
               </div>
@@ -262,53 +264,6 @@ export const SkillPanel = ({
 
           <div className="w-px h-14 bg-border/50 flex-shrink-0" />
 
-          {/* Action Points */}
-          <div className="flex gap-1.5 flex-shrink-0">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div 
-                  className={cn(
-                    "w-9 h-9 flex items-center justify-center rounded-lg border-2 transition-all cursor-default flex-shrink-0",
-                    !unit.hasMoved 
-                      ? "bg-green-900/40 border-green-500/60 text-green-300" 
-                      : "bg-muted/50 border-muted-foreground/20 text-muted-foreground/50"
-                  )}
-                >
-                  <Footprints className="w-4 h-4" />
-                </div>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Очко перемещения</p>
-                <p className="text-xs text-muted-foreground">
-                  {!unit.hasMoved ? 'Доступно — можно переместиться' : 'Использовано'}
-                </p>
-              </TooltipContent>
-            </Tooltip>
-            
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div 
-                  className={cn(
-                    "w-9 h-9 flex items-center justify-center rounded-lg border-2 transition-all cursor-default flex-shrink-0",
-                    !unit.hasActed 
-                      ? "bg-orange-900/40 border-orange-500/60 text-orange-300" 
-                      : "bg-muted/50 border-muted-foreground/20 text-muted-foreground/50"
-                  )}
-                >
-                  <Hand className="w-4 h-4" />
-                </div>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Очко действия</p>
-                <p className="text-xs text-muted-foreground">
-                  {!unit.hasActed ? 'Доступно — можно атаковать или использовать способность' : 'Использовано'}
-                </p>
-              </TooltipContent>
-            </Tooltip>
-          </div>
-
-          <div className="w-px h-14 bg-border/50 flex-shrink-0" />
-
           {/* Stats - 2 rows, fixed width cells */}
           <div className="grid grid-rows-2 grid-flow-col gap-x-1.5 gap-y-1 text-xs flex-shrink-0">
             <Tooltip>
@@ -439,32 +394,89 @@ export const SkillPanel = ({
 
           <div className="w-px h-14 bg-border/50 flex-shrink-0" />
 
-          {/* Reaction - single icon */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div className={cn(
-                "w-9 h-9 flex items-center justify-center rounded-lg border-2 transition-all cursor-default flex-shrink-0",
-                unit.reaction === 'none'
-                  ? "bg-muted/30 border-muted-foreground/20 text-muted-foreground/30"
-                  : unit.reactionAvailable
-                    ? "bg-yellow-900/40 border-yellow-500/60 text-yellow-300 shadow-[0_0_6px_rgba(234,179,8,0.3)]"
-                    : "bg-muted/30 border-muted-foreground/20 text-muted-foreground/40"
-              )}>
-                <RefreshCcw className="w-4 h-4" />
-              </div>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p className={unit.reaction !== 'none' && unit.reactionAvailable ? 'text-yellow-400' : ''}>
-                Реакция: {reactionLabels[unit.reaction]}
-              </p>
-              <p className="text-xs text-muted-foreground">{reactionDescriptions[unit.reaction]}</p>
-              {unit.reaction !== 'none' && (
-                <p className={cn("text-xs mt-1", unit.reactionAvailable ? "text-green-400" : "text-red-400")}>
-                  {unit.reactionAvailable ? '✓ Заряд доступен' : '✗ Заряд использован (восстановится в начале хода)'}
+          {/* Reaction + Movement + Action points - no borders */}
+          <div className="flex gap-1 items-center flex-shrink-0">
+            {/* Reaction */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className={cn(
+                  "w-7 h-7 flex items-center justify-center rounded transition-all cursor-default flex-shrink-0",
+                  unit.reaction === 'none'
+                    ? "text-muted-foreground/30"
+                    : unit.reactionAvailable
+                      ? "text-yellow-300 bg-yellow-900/30"
+                      : "text-muted-foreground/40"
+                )}>
+                  <RefreshCcw className="w-4 h-4" />
+                </div>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p className={unit.reaction !== 'none' && unit.reactionAvailable ? 'text-yellow-400' : ''}>
+                  Реакция: {reactionLabels[unit.reaction]}
                 </p>
-              )}
-            </TooltipContent>
-          </Tooltip>
+                <p className="text-xs text-muted-foreground">{reactionDescriptions[unit.reaction]}</p>
+                {unit.reaction !== 'none' && (
+                  <p className={cn("text-xs mt-1", unit.reactionAvailable ? "text-green-400" : "text-red-400")}>
+                    {unit.reactionAvailable ? '✓ Заряд доступен' : '✗ Заряд использован (восстановится в начале хода)'}
+                  </p>
+                )}
+              </TooltipContent>
+            </Tooltip>
+
+            {/* Movement point */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className={cn(
+                  "w-7 h-7 flex items-center justify-center rounded transition-all cursor-default flex-shrink-0",
+                  !unit.hasMoved 
+                    ? "text-green-300 bg-green-900/30" 
+                    : "text-muted-foreground/40"
+                )}>
+                  <Footprints className="w-4 h-4" />
+                </div>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Очко перемещения</p>
+                <p className="text-xs text-muted-foreground">
+                  {!unit.hasMoved ? 'Доступно — можно переместиться' : 'Использовано'}
+                </p>
+              </TooltipContent>
+            </Tooltip>
+
+            {/* Action point */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className={cn(
+                  "w-7 h-7 flex items-center justify-center rounded transition-all cursor-default flex-shrink-0",
+                  !unit.hasActed 
+                    ? "text-orange-300 bg-orange-900/30" 
+                    : "text-muted-foreground/40"
+                )}>
+                  <Hand className="w-4 h-4" />
+                </div>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Очко действия</p>
+                <p className="text-xs text-muted-foreground">
+                  {!unit.hasActed ? 'Доступно — можно атаковать или использовать способность' : 'Использовано'}
+                </p>
+              </TooltipContent>
+            </Tooltip>
+          </div>
+
+          {/* End Turn button - right edge */}
+          {!isViewOnly && onEndTurn && (
+            <>
+              <div className="flex-1" />
+              <button
+                onClick={onEndTurn}
+                className="fantasy-button flex items-center gap-1.5 py-1.5 px-3 text-sm flex-shrink-0"
+              >
+                <SkipForward className="w-4 h-4" />
+                Завершить
+              </button>
+            </>
+          )}
         </div>
       </TooltipProvider>
     );
