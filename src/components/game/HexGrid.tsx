@@ -19,6 +19,7 @@ interface AttackAnimation {
   toY: number;
   type: 'melee' | 'ranged';
   emoji: string;
+  attackerAvatar?: string;
 }
 
 interface MeleeShakeUnit {
@@ -338,51 +339,30 @@ export const HexGrid = ({
         </g>
       ))}
       
-      {/* Attack animations - smooth projectile */}
+      {/* Attack animations - projectile is attacker avatar */}
       {attackAnimations.map((anim) => {
+        const projectileEmoji = anim.attackerAvatar || anim.emoji;
         return (
           <g key={anim.id}>
             {anim.type === 'ranged' ? (
               <>
-                {/* Smooth trail */}
                 <line
-                  x1={anim.fromX}
-                  y1={anim.fromY}
-                  x2={anim.toX}
-                  y2={anim.toY}
-                  stroke="url(#attackTrail)"
-                  strokeWidth="3"
-                  className="projectile-trail"
-                  strokeLinecap="round"
+                  x1={anim.fromX} y1={anim.fromY} x2={anim.toX} y2={anim.toY}
+                  stroke="url(#attackTrail)" strokeWidth="2" className="projectile-trail" strokeLinecap="round"
                 />
-                {/* Projectile with direction */}
                 <g className="projectile-move" style={{ 
-                  '--start-x': `${anim.fromX}px`, 
-                  '--start-y': `${anim.fromY}px`,
-                  '--end-x': `${anim.toX}px`,
-                  '--end-y': `${anim.toY}px`,
+                  '--start-x': `${anim.fromX}px`, '--start-y': `${anim.fromY}px`,
+                  '--end-x': `${anim.toX}px`, '--end-y': `${anim.toY}px`,
                 } as React.CSSProperties}>
-                  <text
-                    x={anim.toX}
-                    y={anim.toY}
-                    textAnchor="middle"
-                    className="text-2xl"
-                    filter="url(#glow)"
-                  >
-                    {anim.emoji}
+                  <text x={anim.toX} y={anim.toY + 5} textAnchor="middle" className="text-lg select-none" filter="url(#glow)">
+                    {projectileEmoji}
                   </text>
                 </g>
               </>
             ) : (
               <g className="melee-impact">
-                <text
-                  x={anim.toX}
-                  y={anim.toY}
-                  textAnchor="middle"
-                  className="text-3xl"
-                  filter="url(#glow)"
-                >
-                  💥
+                <text x={anim.toX} y={anim.toY + 5} textAnchor="middle" className="text-lg select-none" filter="url(#glow)">
+                  {projectileEmoji}
                 </text>
               </g>
             )}
@@ -390,7 +370,7 @@ export const HexGrid = ({
         );
       })}
       
-      {/* Damage/Healing popups - smooth fly up from center */}
+      {/* Damage/Healing popups - just numbers, crit shows 💥 nearby */}
       {damagePopups.map((popup) => (
         <g key={popup.id} className="damage-popup-smooth">
           <text
@@ -407,12 +387,23 @@ export const HexGrid = ({
             )}
             filter="url(#glow)"
           >
-            {popup.isHealing ? `+${popup.damage}` : popup.isCrit ? `💥${popup.damage}` : `-${popup.damage}`}
+            {popup.isHealing ? `+${popup.damage}` : `-${popup.damage}`}
           </text>
+          {popup.isCrit && !popup.isHealing && (
+            <text
+              x={popup.x + 28}
+              y={popup.y}
+              textAnchor="middle"
+              className="text-base select-none pointer-events-none"
+              filter="url(#glow)"
+            >
+              💥
+            </text>
+          )}
         </g>
       ))}
       
-      {/* Reaction popups - floating reaction icons */}
+      {/* Reaction popups - floating 🔄 icon */}
       {reactionPopups.map((popup) => (
         <g key={popup.id} className="reaction-popup">
           <text

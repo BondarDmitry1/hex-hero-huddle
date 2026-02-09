@@ -1,5 +1,5 @@
 import { BattleUnit, SkillMode } from '@/store/gameStore';
-import { traitLabels, traitDescriptions, reactionLabels, reactionDescriptions } from '@/data/heroes';
+import { traitLabels, traitDescriptions, reactionLabels, reactionDescriptions, statusEffectLabels, statusEffectDescriptions, statusEffectIcons } from '@/data/heroes';
 import { cn } from '@/lib/utils';
 import { 
   Zap, Target, Shield, Footprints, Hand, Swords, Sparkles, 
@@ -51,23 +51,44 @@ export const SkillPanel = ({
     const positiveEffects = unit.buffs?.filter(b => 
       b.type === 'defense_boost' || b.type === 'parry_phys' || b.type === 'parry_mag'
     ) || [];
-    const negativeEffects: Array<{ type: string; name: string }> = [];
+    const negativeEffects: Array<{ type: string; name: string; desc: string; icon: string }> = [];
+    
+    // rangedBlocked as negative effect
+    if (unit.rangedBlocked) {
+      negativeEffects.push({ 
+        type: 'ranged_blocked', 
+        name: 'Стрельба заблокирована', 
+        desc: 'Дистанционная атака недоступна (начал ход рядом с врагом)',
+        icon: '🚫'
+      });
+    }
+    
+    // Status effects from unit
+    (unit.statusEffects || []).forEach(se => {
+      negativeEffects.push({
+        type: se.type,
+        name: statusEffectLabels[se.type] || se.type,
+        desc: `${statusEffectDescriptions[se.type] || ''} (${se.duration} ход.)${se.stacks ? ` ×${se.stacks}` : ''}`,
+        icon: statusEffectIcons[se.type] || '❓',
+      });
+    });
+    
     const allEffects = [
-      ...positiveEffects.map(e => ({ ...e, positive: true })), 
+      ...positiveEffects.map(e => ({ type: e.type, positive: true, icon: '🛡️', name: '', desc: '' })), 
       ...negativeEffects.map(e => ({ ...e, positive: false }))
     ];
 
-    const getEffectLabel = (type: string) => {
-      if (type === 'defense_boost') return { name: 'Готовность', desc: '+1 к обеим защитам' };
-      if (type === 'parry_phys') return { name: 'Парирование', desc: '+2 физ. защиты' };
-      if (type === 'parry_mag') return { name: 'Парирование', desc: '+2 маг. защиты' };
-      return { name: 'Эффект', desc: '' };
+    const getEffectLabel = (type: string, icon?: string, name?: string, desc?: string) => {
+      if (type === 'defense_boost') return { name: 'Готовность', desc: '+1 к обеим защитам', icon: '🛡️' };
+      if (type === 'parry_phys') return { name: 'Парирование', desc: '+2 физ. защиты', icon: '🤺' };
+      if (type === 'parry_mag') return { name: 'Парирование', desc: '+2 маг. защиты', icon: '🤺' };
+      return { name: name || 'Эффект', desc: desc || '', icon: icon || '❓' };
     };
     
     return (
       <TooltipProvider delayDuration={200}>
         <div className="flex items-center gap-3 py-3 px-4">
-          {/* Hero avatar & name - fixed width to prevent jitter */}
+          {/* Hero avatar & name */}
           <Tooltip>
             <TooltipTrigger asChild>
               <div className="flex items-center gap-2 cursor-default flex-shrink-0">
@@ -87,21 +108,21 @@ export const SkillPanel = ({
 
           <div className="w-px h-14 bg-border/50 flex-shrink-0" />
 
-          {/* Status Effects - fixed width */}
-          <div className="grid grid-cols-2 gap-0.5 w-[44px] flex-shrink-0">
+          {/* Status Effects */}
+          <div className="grid grid-cols-3 gap-0.5 w-[66px] flex-shrink-0">
             {allEffects.length > 0 ? (
               allEffects.slice(0, 6).map((effect, idx) => {
-                const info = getEffectLabel(effect.type);
+                const info = getEffectLabel(effect.type, effect.icon, effect.name, effect.desc);
                 return (
                   <Tooltip key={idx}>
                     <TooltipTrigger asChild>
                       <div className={cn(
-                        "w-5 h-5 rounded flex items-center justify-center cursor-default",
+                        "w-5 h-5 rounded flex items-center justify-center cursor-default text-[10px]",
                         effect.positive 
                           ? "bg-green-900/40 border border-green-500/60" 
                           : "bg-red-900/40 border border-red-500/60"
                       )}>
-                        <ShieldPlus className={cn("w-3 h-3", effect.positive ? "text-green-400" : "text-red-400")} />
+                        {info.icon}
                       </div>
                     </TooltipTrigger>
                     <TooltipContent>
@@ -114,7 +135,7 @@ export const SkillPanel = ({
             ) : (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="text-[10px] text-muted-foreground/30 col-span-2 text-center cursor-default">—</span>
+                  <span className="text-[10px] text-muted-foreground/30 col-span-3 text-center cursor-default">—</span>
                 </TooltipTrigger>
                 <TooltipContent>
                   <p>Статус-эффекты</p>
@@ -552,6 +573,41 @@ export const SkillPanel = ({
           </p>
         </div>
       </div>
+
+      {/* Status Effects */}
+      {((unit.statusEffects || []).length > 0 || unit.rangedBlocked) && (
+        <div className="mb-4">
+          <p className="text-xs text-muted-foreground mb-1">Статус-эффекты</p>
+          <div className="flex flex-wrap gap-1">
+            {unit.rangedBlocked && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="px-1.5 py-0.5 rounded text-[10px] bg-red-900/40 border border-red-500/60 text-red-300 cursor-default">
+                    🚫 Стрельба заблокирована
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p className="text-red-400">Стрельба заблокирована</p>
+                  <p className="text-xs text-muted-foreground">Дистанционная атака недоступна (начал ход рядом с врагом)</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
+            {(unit.statusEffects || []).map((se, idx) => (
+              <Tooltip key={idx}>
+                <TooltipTrigger asChild>
+                  <div className="px-1.5 py-0.5 rounded text-[10px] bg-red-900/40 border border-red-500/60 text-red-300 cursor-default">
+                    {statusEffectIcons[se.type]} {statusEffectLabels[se.type]} {se.stacks && se.stacks > 1 ? `×${se.stacks}` : ''} ({se.duration})
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p className="text-red-400">{statusEffectLabels[se.type]}</p>
+                  <p className="text-xs text-muted-foreground">{statusEffectDescriptions[se.type]}</p>
+                </TooltipContent>
+              </Tooltip>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Skill mode indicator */}
       {skillMode && !isViewOnly && (
