@@ -94,12 +94,26 @@ export const BattleArena = () => {
     }, 600);
   }, []);
 
-  // Show attack animation
+  // Skill emoji mapping
+  const getSkillEmoji = useCallback((skillId: string): string => {
+    const map: Record<string, string> = {
+      shield_wall: '🛡️', fortress: '🏰', earthquake: '🌍', mountain_form: '⛰️',
+      holy_strike: '⚜️', divine_judgement: '⚡', shadow_step: '🗡️', dance_of_blades: '⚔️',
+      fireball: '🔥', meteor_storm: '☄️', piercing_shot: '🏹', arrow_rain: '🌧️',
+      whirlwind: '🌪️', rampage: '🪓', ice_lance: '❄️', blizzard: '🌨️',
+      healing_light: '✨', divine_intervention: '👼', war_cry: '📯', drums_of_war: '🥁',
+      dark_pact: '💀', army_of_dead: '☠️', totem_of_protection: '🌩️', storm_call: '⚡',
+    };
+    return map[skillId] || '✨';
+  }, []);
+
+  // Show attack animation - projectile is attacker's avatar
   const showAttackAnimation = useCallback((
     attacker: BattleUnit, 
     target: BattleUnit, 
     onComplete: () => void,
-    isForcedMelee: boolean = false
+    isForcedMelee: boolean = false,
+    customEmoji?: string
   ) => {
     if (!attacker.position || !target.position) {
       onComplete();
@@ -111,18 +125,7 @@ export const BattleArena = () => {
     const id = `attack-${popupIdRef.current++}`;
     
     const isMeleeAttack = attacker.attackRange === 'melee' || isForcedMelee;
-    
-    let emoji = '💥';
-    if (!isMeleeAttack) {
-      if (attacker.attackType === 'magical') {
-        emoji = attacker.id.includes('fire') ? '🔥' : 
-                attacker.id.includes('frost') ? '❄️' : 
-                attacker.id.includes('necro') ? '💀' :
-                attacker.id.includes('shaman') ? '⚡' : '✨';
-      } else {
-        emoji = '🏹';
-      }
-    }
+    const projectileAvatar = customEmoji || attacker.avatar;
     
     if (isMeleeAttack) {
       showMeleeShake(attacker.id);
@@ -130,25 +133,22 @@ export const BattleArena = () => {
     
     setAttackAnimations(prev => [...prev, {
       id,
-      fromX: from.x,
-      fromY: from.y,
-      toX: to.x,
-      toY: to.y,
+      fromX: from.x, fromY: from.y, toX: to.x, toY: to.y,
       type: isMeleeAttack ? 'melee' : 'ranged',
-      emoji,
+      emoji: projectileAvatar,
+      attackerAvatar: projectileAvatar,
     }]);
     
     setTimeout(() => {
       setAttackAnimations(prev => prev.filter(a => a.id !== id));
       onComplete();
-    }, 700);
+    }, 1400);
   }, [hexToPixel, showMeleeShake]);
 
   // Show reaction popup (universal icon floating up from hero center)
-  const showReactionPopup = useCallback((pos: { q: number; r: number }, _emoji?: string) => {
+  const showReactionPopup = useCallback((pos: { q: number; r: number }) => {
     const { x, y } = hexToPixel(pos.q, pos.r);
     const id = `reaction-${popupIdRef.current++}`;
-    // Universal reaction icon - always use 🔄
     setReactionPopups(prev => [...prev, { id, x, y, emoji: '🔄' }]);
     setTimeout(() => {
       setReactionPopups(prev => prev.filter(p => p.id !== id));
@@ -161,49 +161,77 @@ export const BattleArena = () => {
     toPos: { q: number; r: number },
     isMelee: boolean,
     attackerId: string,
-    damage: number
+    damage: number,
+    attackerAvatar?: string
   ) => {
     const from = hexToPixel(fromPos.q, fromPos.r);
     const to = hexToPixel(toPos.q, toPos.r);
     const id = `reaction-atk-${popupIdRef.current++}`;
-    const emoji = isMelee ? '💥' : '🏹';
+    const emoji = attackerAvatar || (isMelee ? '⚔️' : '🏹');
     
     if (isMelee) showMeleeShake(attackerId);
     
     setAttackAnimations(prev => [...prev, {
       id, fromX: from.x, fromY: from.y, toX: to.x, toY: to.y,
       type: isMelee ? 'melee' : 'ranged', emoji,
+      attackerAvatar: emoji,
     }]);
     
     setTimeout(() => {
       setAttackAnimations(prev => prev.filter(a => a.id !== id));
       showDamagePopup(toPos, damage, false, false);
-    }, 700);
+    }, 1400);
   }, [hexToPixel, showMeleeShake, showDamagePopup]);
 
-  // Handle reaction animation from attack result
-  const handleReactionAnimation = useCallback((reaction: { type: string; reactorId: string; damage?: number; isMelee?: boolean; reactorPos?: { q: number; r: number }; targetPos?: { q: number; r: number } }) => {
-    if (reaction.reactorPos) {
-      showReactionPopup(reaction.reactorPos);
-    }
-    
-    if (reaction.damage && reaction.reactorPos && reaction.targetPos) {
+  // Handle full attack result with proper sequencing
+  const handleAttackResult = useCallback((
+    result: { damage: number; isCrit: boolean; parryTriggered?: boolean; reaction?: { type: string; reactorId: string; damage?: number; isMelee?: boolean; reactorPos?: { q: number; r: number }; targetPos?: { q: number; r: number } } },
+    targetPos: { q: number; r: number },
+    allUnitsRef: BattleUnit[]
+  ) => {
+    if (result.parryTriggered) {
+      // Parry: show 🔄 first, then damage (reduced)
+      showReactionPopup(targetPos);
       setTimeout(() => {
-        showReactionAttackAnimation(
-          reaction.reactorPos!, reaction.targetPos!,
-          !!reaction.isMelee, reaction.reactorId, reaction.damage!
-        );
-      }, 1000);
+        showDamagePopup(targetPos, result.damage, result.isCrit, false);
+      }, 1200);
+    } else {
+      // Normal: show damage first
+      showDamagePopup(targetPos, result.damage, result.isCrit, false);
+      
+      // Then reaction after damage animation finishes
+      if (result.reaction && result.reaction.reactorPos) {
+        setTimeout(() => {
+          showReactionPopup(result.reaction!.reactorPos!);
+          
+          // Then reaction effect after 🔄 animation
+          if (result.reaction!.damage && result.reaction!.reactorPos && result.reaction!.targetPos) {
+            const reactor = allUnitsRef.find(u => u.id === result.reaction!.reactorId);
+            setTimeout(() => {
+              showReactionAttackAnimation(
+                result.reaction!.reactorPos!, result.reaction!.targetPos!,
+                !!result.reaction!.isMelee, result.reaction!.reactorId, result.reaction!.damage!,
+                reactor?.avatar
+              );
+            }, 1200);
+          }
+        }, 2000);
+      }
     }
-  }, [showReactionPopup, showReactionAttackAnimation]);
+  }, [showReactionPopup, showDamagePopup, showReactionAttackAnimation]);
 
-  // Handle provoked attack animation from move result
+  // Handle provoked attack animation from move result  
   const handleProvokedAnimation = useCallback((provokedAttack: { attackerId: string; damage: number; attackerPos: { q: number; r: number }; targetPos: { q: number; r: number } }) => {
+    const allUnitsNow = [...useGameStore.getState().playerUnits, ...useGameStore.getState().enemyUnits];
+    const provoker = allUnitsNow.find(u => u.id === provokedAttack.attackerId);
     showReactionPopup(provokedAttack.attackerPos);
-    showReactionAttackAnimation(
-      provokedAttack.attackerPos, provokedAttack.targetPos,
-      true, provokedAttack.attackerId, provokedAttack.damage
-    );
+    setTimeout(() => {
+      showReactionAttackAnimation(
+        provokedAttack.attackerPos, provokedAttack.targetPos,
+        true, provokedAttack.attackerId, provokedAttack.damage,
+        provoker?.avatar
+      );
+    }, 1200);
   }, [showReactionPopup, showReactionAttackAnimation]);
 
   // Auto-select current unit
@@ -243,11 +271,8 @@ export const BattleArena = () => {
             showAttackAnimation(currentUnit, target, () => {
               const result = attackUnit(currentUnit, target);
               if (target.position) {
-                showDamagePopup(target.position, result.damage, result.isCrit, false);
-              }
-              // Handle reaction animation
-              if (result.reaction) {
-                handleReactionAnimation(result.reaction);
+                const freshAll = [...useGameStore.getState().playerUnits, ...useGameStore.getState().enemyUnits];
+                handleAttackResult(result, target.position, freshAll);
               }
             }, !!isForcedMelee);
             
@@ -324,7 +349,7 @@ export const BattleArena = () => {
       
       return () => clearTimeout(timer);
     }
-  }, [currentUnit, allUnits, obstacles, moveUnit, endTurn, attackUnit, alivePlayerUnits, gameOver, showAttackAnimation, showDamagePopup, handleReactionAnimation, handleProvokedAnimation]);
+  }, [currentUnit, allUnits, obstacles, moveUnit, endTurn, attackUnit, alivePlayerUnits, gameOver, showAttackAnimation, showDamagePopup, handleAttackResult, handleProvokedAnimation]);
 
   const handleHexClick = useCallback((q: number, r: number) => {
     if (!currentUnit || currentUnit.owner !== 'player' || gameOver) return;
@@ -336,25 +361,19 @@ export const BattleArena = () => {
     if (skillMode && skillRange.has(key)) {
       const targetPos = { q, r };
       
-      // Show skill animation
       if (currentUnit.position) {
+        const skill = skillMode === 'active' ? currentUnit.skills.active : currentUnit.skills.ultimate;
+        const skillEmoji = getSkillEmoji(skill.id);
         const from = hexToPixel(currentUnit.position.q, currentUnit.position.r);
         const to = hexToPixel(q, r);
         const id = `skill-${popupIdRef.current++}`;
         
-        // Choose skill emoji
-        const skillEmoji = skillMode === 'ultimate' ? '💫' : 
-          currentUnit.role === 'support' ? '✨' : 
-          currentUnit.attackType === 'magical' ? '🔮' : '⚡';
-        
         setAttackAnimations(prev => [...prev, {
           id,
-          fromX: from.x,
-          fromY: from.y,
-          toX: to.x,
-          toY: to.y,
+          fromX: from.x, fromY: from.y, toX: to.x, toY: to.y,
           type: 'ranged',
           emoji: skillEmoji,
+          attackerAvatar: skillEmoji,
         }]);
         
         setTimeout(() => {
@@ -362,17 +381,16 @@ export const BattleArena = () => {
           
           const result = useSkill(currentUnit, targetPos, skillMode);
           if (result) {
-            // Show damage/heal popups for each target
             result.targets.forEach((t, index) => {
               setTimeout(() => {
                 if (t.unit.position) {
                   const isHeal = result.type === 'heal';
                   showDamagePopup(t.unit.position, t.value, false, isHeal);
                 }
-              }, index * 100);
+              }, index * 200);
             });
           }
-        }, 800);
+        }, 1400);
       }
       return;
     }
@@ -450,12 +468,8 @@ export const BattleArena = () => {
       if (canAttack) {
         showAttackAnimation(currentUnit, clickedUnit, () => {
           const result = attackUnit(currentUnit, clickedUnit);
-          showDamagePopup({ q, r }, result.damage, result.isCrit, false);
-          
-          // Handle reaction animation
-          if (result.reaction) {
-            handleReactionAnimation(result.reaction);
-          }
+          const freshAll = [...useGameStore.getState().playerUnits, ...useGameStore.getState().enemyUnits];
+          handleAttackResult(result, { q, r }, freshAll);
         }, isForcedMelee);
         return;
       }
@@ -476,7 +490,7 @@ export const BattleArena = () => {
         handleProvokedAnimation(moveResult.provokedAttack);
       }
     }
-  }, [currentUnit, allUnits, selectedUnit, movementRange, moveUnit, attackUnit, setSelectedUnit, gameOver, showAttackAnimation, showDamagePopup, skillMode, skillRange, setSkillMode, setSkillRange, useSkill, hexToPixel, isRangedBlocked, obstacles, markUnitActed, handleReactionAnimation, handleProvokedAnimation, showMeleeShake]);
+  }, [currentUnit, allUnits, selectedUnit, movementRange, moveUnit, attackUnit, setSelectedUnit, gameOver, showAttackAnimation, showDamagePopup, skillMode, skillRange, setSkillMode, setSkillRange, useSkill, hexToPixel, isRangedBlocked, obstacles, markUnitActed, handleAttackResult, handleProvokedAnimation, showMeleeShake, getSkillEmoji]);
 
   const handleHexHover = useCallback((q: number, r: number, unit: BattleUnit | null) => {
     // Set hovered unit for showing info panel on right

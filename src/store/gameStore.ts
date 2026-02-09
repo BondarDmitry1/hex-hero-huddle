@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Hero, heroes, calculateDamage, HeroTrait, HeroReaction } from '@/data/heroes';
+import { Hero, heroes, calculateDamage, HeroTrait, HeroReaction, StatusEffect } from '@/data/heroes';
 
 export type GamePhase = 'menu' | 'heroes' | 'draft' | 'placement' | 'battle';
 export type Player = 'player' | 'enemy';
@@ -14,9 +14,10 @@ export interface BattleUnit extends Hero {
   hasActed: boolean;
   isDead: boolean;
   reactionAvailable: boolean;
-  rangedBlocked: boolean; // Can't use ranged attacks (started turn adjacent to enemy)
-  hasWaited?: boolean; // Track if unit used Wait this round
+  rangedBlocked: boolean;
+  hasWaited?: boolean;
   buffs?: { type: string; duration: number; value?: number }[];
+  statusEffects: StatusEffect[];
 }
 
 export interface SkillResult {
@@ -54,7 +55,7 @@ interface GameState {
   setSelectedUnit: (unit: BattleUnit | null) => void;
   setHoveredUnit: (unit: BattleUnit | null) => void;
   moveUnit: (unit: BattleUnit, position: { q: number; r: number }) => { provokedAttack?: { attackerId: string; damage: number; attackerPos: { q: number; r: number }; targetPos: { q: number; r: number } } };
-  attackUnit: (attacker: BattleUnit, target: BattleUnit) => { damage: number; isCrit: boolean; reaction?: { type: string; reactorId: string; damage?: number; isMelee?: boolean; reactorPos?: { q: number; r: number }; targetPos?: { q: number; r: number } } };
+  attackUnit: (attacker: BattleUnit, target: BattleUnit) => { damage: number; isCrit: boolean; parryTriggered?: boolean; reaction?: { type: string; reactorId: string; damage?: number; isMelee?: boolean; reactorPos?: { q: number; r: number }; targetPos?: { q: number; r: number } } };
   markUnitActed: (unitId: string, alsoMoved?: boolean) => void;
   useSkill: (caster: BattleUnit, targetPos: { q: number; r: number }, skillType: 'active' | 'ultimate') => SkillResult | null;
   endTurn: () => void;
@@ -197,6 +198,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       isDead: false,
       reactionAvailable: hero.reaction !== 'none',
       rangedBlocked: false,
+      statusEffects: [],
     }));
     
     const enemyUnits: BattleUnit[] = state.enemyDraft.map((hero, index) => ({
@@ -210,6 +212,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       isDead: false,
       reactionAvailable: hero.reaction !== 'none',
       rangedBlocked: false,
+      statusEffects: [],
     }));
     
     const allUnits = [...playerUnits, ...enemyUnits];
@@ -320,33 +323,48 @@ export const useGameStore = create<GameState>((set, get) => ({
       return { damage: 0, isCrit: false };
     }
     
-    let damage = calculateDamage(
-      attacker.attack,
-      attacker.attackType,
-      target.physicalDefense,
-      target.magicalDefense
-    );
-    
-    // Ranged penalties
+    // Determine attack mode and penalties
     let forcedMelee = false;
     let hasDamagePenalty = false;
     if (attacker.attackRange === 'ranged') {
-      // Check if ranged is blocked (started turn adjacent to enemy)
       if (attacker.rangedBlocked) {
-        // Can only melee adjacent
         if (distance === 1) {
-          if (attacker.trait !== 'no_melee_penalty') {
-            damage = Math.floor(damage / 3);
-            hasDamagePenalty = true;
-          }
+          if (attacker.trait !== 'no_melee_penalty') hasDamagePenalty = true;
           forcedMelee = true;
         } else {
           return { damage: 0, isCrit: false };
         }
       } else if (distance > attacker.range) {
-        damage = Math.floor(damage / 2);
         hasDamagePenalty = true;
       }
+    }
+    
+    const isMeleeAttack = attacker.attackRange === 'melee' || forcedMelee;
+    
+    // Calculate effective defense including buffs
+    let effectivePhysDef = target.physicalDefense;
+    let effectiveMagDef = target.magicalDefense;
+    if (target.buffs?.some(b => b.type === 'defense_boost')) { effectivePhysDef += 1; effectiveMagDef += 1; }
+    if (target.buffs?.some(b => b.type === 'parry_phys')) effectivePhysDef += 2;
+    if (target.buffs?.some(b => b.type === 'parry_mag')) effectiveMagDef += 2;
+    
+    // Check PARRY reaction BEFORE damage calculation
+    let parryTriggered = false;
+    if (!target.isDead && target.reactionAvailable && target.reaction === 'parry' && attacker.trait !== 'ignores_reactions') {
+      if (Math.random() < 0.5) {
+        parryTriggered = true;
+        if (attacker.attackType === 'physical') effectivePhysDef += 2;
+        else effectiveMagDef += 2;
+      }
+    }
+    
+    let damage = calculateDamage(attacker.attack, attacker.attackType, effectivePhysDef, effectiveMagDef);
+    
+    // Apply ranged penalties after base damage calc
+    if (attacker.attackRange === 'ranged' && forcedMelee && attacker.trait !== 'no_melee_penalty') {
+      damage = Math.floor(damage / 3);
+    } else if (attacker.attackRange === 'ranged' && !forcedMelee && hasDamagePenalty) {
+      damage = Math.floor(damage / 2);
     }
     
     const isCrit = Math.random() < 0.1;
@@ -356,8 +374,6 @@ export const useGameStore = create<GameState>((set, get) => ({
     
     const newHealth = Math.max(0, target.currentHealth - damage);
     const isDead = newHealth === 0;
-    
-    const isMeleeAttack = attacker.attackRange === 'melee' || forcedMelee;
     
     // Energy economy based on attack type and penalties
     let attackerEnergyGain: number;
@@ -395,8 +411,22 @@ export const useGameStore = create<GameState>((set, get) => ({
     
     let reactionResult: { type: string; reactorId: string; damage?: number; isMelee?: boolean; reactorPos?: { q: number; r: number }; targetPos?: { q: number; r: number } } | undefined;
     
-    // Process reactions (if target has reaction available and attacker doesn't ignore reactions)
-    if (!isDead && target.reactionAvailable && target.reaction !== 'none' && attacker.trait !== 'ignores_reactions') {
+    // Handle parry result (already triggered before damage)
+    if (parryTriggered) {
+      const parryBuff = { 
+        type: attacker.attackType === 'physical' ? 'parry_phys' : 'parry_mag', 
+        duration: 1, value: 2 
+      };
+      targetUpdates.buffs = [...(target.buffs || []), parryBuff];
+      targetUpdates.reactionAvailable = false;
+      targetUpdates.currentEnergy = Math.min(target.maxEnergy, targetEnergy + 5);
+      const defLabel = attacker.attackType === 'physical' ? 'физ.' : 'маг.';
+      get().addBattleLog(`🤺 ${target.avatar} парирование! +2 ${defLabel} защиты`);
+      reactionResult = { type: 'parry', reactorId: target.id, reactorPos: target.position ? { ...target.position } : undefined };
+    }
+    
+    // Process post-damage reactions (counter, return, retreat - NOT parry)
+    if (!isDead && !parryTriggered && target.reactionAvailable && target.reaction !== 'none' && target.reaction !== 'parry' && attacker.trait !== 'ignores_reactions') {
       const reactionType = target.reaction;
       
       switch (reactionType) {
@@ -495,25 +525,7 @@ export const useGameStore = create<GameState>((set, get) => ({
           }
           break;
         }
-        case 'parry': {
-          // 50% chance, works on any attack
-          if (Math.random() < 0.5) {
-            const defenseType = attacker.attackType;
-            const parryBuff = { 
-              type: defenseType === 'physical' ? 'parry_phys' : 'parry_mag', 
-              duration: 1, 
-              value: 2 
-            };
-            targetUpdates.buffs = [...(target.buffs || []), parryBuff];
-            targetUpdates.reactionAvailable = false;
-            targetUpdates.currentEnergy = Math.min(target.maxEnergy, targetEnergy + 5);
-            
-            const defLabel = defenseType === 'physical' ? 'физ.' : 'маг.';
-            get().addBattleLog(`🤺 ${target.avatar} парирование! +2 ${defLabel} защиты`);
-            reactionResult = { type: 'parry', reactorId: target.id, reactorPos: target.position ? { ...target.position } : undefined };
-          }
-          break;
-        }
+        // Parry is handled before damage calculation (above)
       }
     }
     
@@ -546,7 +558,7 @@ export const useGameStore = create<GameState>((set, get) => ({
     const killText = isDead ? ` ☠️ ${target.name} повержен!` : '';
     get().addBattleLog(`${attacker.avatar} → ${target.avatar}: ${damage} урона${critText}${distanceText}${killText}`);
     
-    return { damage, isCrit, reaction: reactionResult };
+    return { damage, isCrit, parryTriggered, reaction: reactionResult };
   },
   
   endTurn: () => {

@@ -39,6 +39,70 @@ export const reactionDescriptions: Record<HeroReaction, string> = {
   none: 'Нет реакции',
 };
 
+export type StatusEffectType = 
+  | 'acid' | 'burning' | 'frozen' | 'stunned' | 'immobilized'
+  | 'silenced' | 'suppressed' | 'distracted' | 'sleep'
+  | 'bleeding' | 'fear' | 'taunt' | 'powerless' | 'ranged_blocked';
+
+export interface StatusEffect {
+  type: StatusEffectType;
+  duration: number;
+  stacks?: number;
+  sourceId?: string;
+  turnsActive?: number;
+}
+
+export const statusEffectLabels: Record<StatusEffectType, string> = {
+  acid: 'Кислота',
+  burning: 'Горение',
+  frozen: 'Заморозка',
+  stunned: 'Оглушение',
+  immobilized: 'Обездвиживание',
+  silenced: 'Безмолвие',
+  suppressed: 'Подавление',
+  distracted: 'Отвлечение',
+  sleep: 'Сон',
+  bleeding: 'Кровотечение',
+  fear: 'Страх',
+  taunt: 'Провокация',
+  powerless: 'Бессилие',
+  ranged_blocked: 'Стрельба заблокирована',
+};
+
+export const statusEffectDescriptions: Record<StatusEffectType, string> = {
+  acid: 'Наносит 10 физ. урона/ход. Снижает физ. защиту на 1/ход за заряд. До 3 зарядов. 3 хода.',
+  burning: 'Наносит 15 маг. урона/ход. 2 хода. Повторное наложение обновляет длительность.',
+  frozen: 'Пропуск хода. Нельзя лечить.',
+  stunned: 'Пропуск хода. После оглушения реакция недоступна 1 ход.',
+  immobilized: 'Герой не может двигаться.',
+  silenced: 'Нельзя использовать активные способности и ульт.',
+  suppressed: 'Отключает пассивные способности.',
+  distracted: 'Отключает реакции.',
+  sleep: 'Пропуск хода. Урон пробуждает (+15% урона по спящему).',
+  bleeding: 'Урон % от макс. HP (9→12→15%). Игнорирует защиту. Лечение снимает.',
+  fear: 'Автоматически бежит в случайном направлении. Пропуск хода.',
+  taunt: 'Автоматически подбегает к источнику и атакует в ближнем бою.',
+  powerless: 'Герой не может атаковать.',
+  ranged_blocked: 'Дистанционная атака недоступна (начал ход рядом с врагом).',
+};
+
+export const statusEffectIcons: Record<StatusEffectType, string> = {
+  acid: '🧪',
+  burning: '🔥',
+  frozen: '🧊',
+  stunned: '⚡',
+  immobilized: '🔗',
+  silenced: '🤐',
+  suppressed: '🚫',
+  distracted: '😵',
+  sleep: '💤',
+  bleeding: '🩸',
+  fear: '😱',
+  taunt: '😤',
+  powerless: '💫',
+  ranged_blocked: '🚫',
+};
+
 export interface Skill {
   id: string;
   name: string;
