@@ -82,7 +82,7 @@ export const BattleArena = () => {
     
     setTimeout(() => {
       setDamagePopups(prev => prev.filter(p => p.id !== id));
-    }, 2000);
+    }, 1400);
   }, [hexToPixel]);
 
   // Show melee shake effect on attacker
@@ -107,7 +107,7 @@ export const BattleArena = () => {
     return map[skillId] || '✨';
   }, []);
 
-  // Show attack animation - projectile is attacker's avatar
+  // Show attack animation - projectile flies from attacker center to target center
   const showAttackAnimation = useCallback((
     attacker: BattleUnit, 
     target: BattleUnit, 
@@ -139,10 +139,12 @@ export const BattleArena = () => {
       attackerAvatar: projectileAvatar,
     }]);
     
+    // Ranged: 600ms flight, Melee: 400ms impact
+    const duration = isMeleeAttack ? 400 : 600;
     setTimeout(() => {
       setAttackAnimations(prev => prev.filter(a => a.id !== id));
       onComplete();
-    }, 1400);
+    }, duration);
   }, [hexToPixel, showMeleeShake]);
 
   // Show reaction popup (universal icon floating up from hero center)
@@ -152,7 +154,7 @@ export const BattleArena = () => {
     setReactionPopups(prev => [...prev, { id, x, y, emoji: '🔄' }]);
     setTimeout(() => {
       setReactionPopups(prev => prev.filter(p => p.id !== id));
-    }, 2000);
+    }, 1200);
   }, [hexToPixel]);
 
   // Helper for reaction attack animation (counterattack, return shot, provoked attack)
@@ -177,34 +179,38 @@ export const BattleArena = () => {
       attackerAvatar: emoji,
     }]);
     
+    const duration = isMelee ? 400 : 600;
     setTimeout(() => {
       setAttackAnimations(prev => prev.filter(a => a.id !== id));
       showDamagePopup(toPos, damage, false, false);
-    }, 1400);
+    }, duration);
   }, [hexToPixel, showMeleeShake, showDamagePopup]);
 
-  // Handle full attack result with proper sequencing
+  // Handle full attack result with proper sequencing:
+  // 1. Damage number immediately (projectile just arrived)
+  // 2. After damage floats up (~1200ms), show reaction icon
+  // 3. After reaction icon (~1000ms), trigger reaction effect
   const handleAttackResult = useCallback((
     result: { damage: number; isCrit: boolean; parryTriggered?: boolean; reaction?: { type: string; reactorId: string; damage?: number; isMelee?: boolean; reactorPos?: { q: number; r: number }; targetPos?: { q: number; r: number } } },
     targetPos: { q: number; r: number },
     allUnitsRef: BattleUnit[]
   ) => {
     if (result.parryTriggered) {
-      // Parry: show 🔄 first, then damage (reduced)
+      // Parry: show 🔄 first, then reduced damage
       showReactionPopup(targetPos);
       setTimeout(() => {
         showDamagePopup(targetPos, result.damage, result.isCrit, false);
-      }, 1200);
+      }, 800);
     } else {
-      // Normal: show damage first
+      // Normal: damage immediately from target center upward
       showDamagePopup(targetPos, result.damage, result.isCrit, false);
       
-      // Then reaction after damage animation finishes
+      // Then reaction after damage finishes floating
       if (result.reaction && result.reaction.reactorPos) {
         setTimeout(() => {
           showReactionPopup(result.reaction!.reactorPos!);
           
-          // Then reaction effect after 🔄 animation
+          // Then reaction attack after icon floats
           if (result.reaction!.damage && result.reaction!.reactorPos && result.reaction!.targetPos) {
             const reactor = allUnitsRef.find(u => u.id === result.reaction!.reactorId);
             setTimeout(() => {
@@ -213,9 +219,9 @@ export const BattleArena = () => {
                 !!result.reaction!.isMelee, result.reaction!.reactorId, result.reaction!.damage!,
                 reactor?.avatar
               );
-            }, 1200);
+            }, 800);
           }
-        }, 2000);
+        }, 1200);
       }
     }
   }, [showReactionPopup, showDamagePopup, showReactionAttackAnimation]);
@@ -231,7 +237,7 @@ export const BattleArena = () => {
         true, provokedAttack.attackerId, provokedAttack.damage,
         provoker?.avatar
       );
-    }, 1200);
+    }, 800);
   }, [showReactionPopup, showReactionAttackAnimation]);
 
   // Auto-select current unit
@@ -387,10 +393,10 @@ export const BattleArena = () => {
                   const isHeal = result.type === 'heal';
                   showDamagePopup(t.unit.position, t.value, false, isHeal);
                 }
-              }, index * 200);
+              }, index * 150);
             });
           }
-        }, 1400);
+        }, 600);
       }
       return;
     }

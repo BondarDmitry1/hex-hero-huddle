@@ -339,9 +339,11 @@ export const HexGrid = ({
         </g>
       ))}
       
-      {/* Attack animations - projectile is attacker avatar */}
+      {/* Attack animations - projectile flies from attacker center to target center */}
       {attackAnimations.map((anim) => {
         const projectileEmoji = anim.attackerAvatar || anim.emoji;
+        const dx = anim.toX - anim.fromX;
+        const dy = anim.toY - anim.fromY;
         return (
           <g key={anim.id}>
             {anim.type === 'ranged' ? (
@@ -350,14 +352,18 @@ export const HexGrid = ({
                   x1={anim.fromX} y1={anim.fromY} x2={anim.toX} y2={anim.toY}
                   stroke="url(#attackTrail)" strokeWidth="2" className="projectile-trail" strokeLinecap="round"
                 />
-                <g className="projectile-move" style={{ 
-                  '--start-x': `${anim.fromX}px`, '--start-y': `${anim.fromY}px`,
-                  '--end-x': `${anim.toX}px`, '--end-y': `${anim.toY}px`,
-                } as React.CSSProperties}>
-                  <text x={anim.toX} y={anim.toY + 5} textAnchor="middle" className="text-lg select-none" filter="url(#glow)">
-                    {projectileEmoji}
-                  </text>
-                </g>
+                <text
+                  x={anim.fromX} y={anim.fromY + 5}
+                  textAnchor="middle"
+                  className="text-base select-none projectile-fly-to-target"
+                  filter="url(#glow)"
+                  style={{
+                    '--dx': `${dx}px`,
+                    '--dy': `${dy}px`,
+                  } as React.CSSProperties}
+                >
+                  {projectileEmoji}
+                </text>
               </>
             ) : (
               <g className="melee-impact">
