@@ -119,22 +119,15 @@ export const HexGrid = ({
           if (currentUnit.attackRange === 'melee') {
             isInAttackRange = distance <= currentUnit.range;
           } else {
-            // Стрелок заблокирован - может атаковать только вплотную
+            // Ranged unit blocked by debuff (started turn adjacent to enemy)
             if (isRangedBlocked) {
               isInAttackRange = distance === 1;
               if (distance === 1) {
                 forcedMeleeAttack = true;
               }
-            } else if (currentUnit.hasMoved) {
-              // Already moved - ranged attack unavailable, can only melee adjacent
-              if (distance === 1) {
-                isInAttackRange = true;
-                forcedMeleeAttack = true;
-              }
             } else {
-              // Стрелок свободен - дальняя атака
+              // Ranged is free - can shoot at any distance
               isInAttackRange = true;
-              // Штраф если дистанция больше range героя
               if (distance > currentUnit.range) {
                 attackDistancePenalty = true;
               }
@@ -500,7 +493,7 @@ const getNeighbors = (q: number, r: number): { q: number; r: number }[] => {
   }
 };
 
-// Calculate movement range - blocks movement through other units, supports flight through obstacles
+// Calculate movement range - flight passes through obstacles AND units
 export const getMovementRange = (
   unit: BattleUnit,
   units: BattleUnit[],
@@ -544,10 +537,18 @@ export const getMovementRange = (
       for (const n of neighbors) {
         const nKey = `${n.q},${n.r}`;
         if (n.q >= 0 && n.q < width && n.r >= 0 && n.r < height) {
-          // Can't move through other units
-          if (occupiedSet.has(nKey)) continue;
-          // Can move through obstacles only with flight trait
-          if (obstacles.has(nKey) && !hasFlight) continue;
+          if (hasFlight) {
+            // Flight: pass through obstacles AND other units, but can't stop on them
+            if (obstacles.has(nKey) || occupiedSet.has(nKey)) {
+              // Can pass through but only if not stopping here (handled above)
+              queue.push({ q: n.q, r: n.r, distance: current.distance + 1 });
+              continue;
+            }
+          } else {
+            // No flight: can't move through other units or obstacles
+            if (occupiedSet.has(nKey)) continue;
+            if (obstacles.has(nKey)) continue;
+          }
           queue.push({ q: n.q, r: n.r, distance: current.distance + 1 });
         }
       }

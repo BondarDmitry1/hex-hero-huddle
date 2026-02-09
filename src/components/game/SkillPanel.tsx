@@ -135,7 +135,7 @@ export const SkillPanel = ({
                   onClick={() => onUseSkill('active')}
                   disabled={unit.hasActed}
                   className={cn(
-                    'w-9 h-9 flex items-center justify-center rounded-lg border-2 transition-all flex-shrink-0',
+                    'w-10 h-10 flex items-center justify-center rounded-lg border-2 transition-all flex-shrink-0',
                     isActiveMode 
                       ? 'bg-amber-700/40 border-amber-400 ring-2 ring-amber-400/50 text-amber-300' 
                       : !unit.hasActed 
@@ -161,7 +161,7 @@ export const SkillPanel = ({
                   onClick={() => onUseSkill('ultimate')}
                   disabled={!canUseUltimate || unit.hasActed}
                   className={cn(
-                    'w-9 h-9 flex items-center justify-center rounded-lg border-2 transition-all relative overflow-hidden flex-shrink-0',
+                    'w-10 h-10 flex items-center justify-center rounded-lg border-2 transition-all relative overflow-hidden flex-shrink-0',
                     isUltimateMode
                       ? 'bg-purple-700/40 border-purple-400 ring-2 ring-purple-400/50'
                       : canUseUltimate && !unit.hasActed
@@ -199,7 +199,7 @@ export const SkillPanel = ({
               <TooltipTrigger asChild>
                 <div
                   className={cn(
-                    'w-9 h-9 flex items-center justify-center transition-all cursor-default flex-shrink-0',
+                    'w-10 h-10 flex items-center justify-center transition-all cursor-default flex-shrink-0',
                     isPassiveActive ? 'text-sky-300' : 'text-sky-300/30'
                   )}
                 >
@@ -220,43 +220,44 @@ export const SkillPanel = ({
               <TooltipTrigger asChild>
                 <button
                   onClick={onWait}
-                  disabled={!onWait}
+                  disabled={!onWait || unit.hasWaited}
                   className={cn(
-                    'w-9 h-9 flex items-center justify-center rounded-lg border-2 transition-all flex-shrink-0',
-                    onWait
+                    'w-10 h-10 flex items-center justify-center rounded-lg border-2 transition-all flex-shrink-0',
+                    onWait && !unit.hasWaited
                       ? 'bg-slate-900/30 border-slate-500/50 hover:bg-slate-900/50 cursor-pointer text-slate-300'
                       : 'bg-slate-900/10 border-slate-500/20 opacity-50 cursor-not-allowed text-slate-400/50'
                   )}
                 >
-                  <Clock className="w-4 h-4" />
+                  <Clock className="w-[18px] h-[18px]" />
                 </button>
               </TooltipTrigger>
               <TooltipContent className="max-w-xs">
                 <p className="font-semibold text-slate-300">Ждать</p>
                 <p className="text-xs text-muted-foreground">Герой перемещается в конец очереди инициативы</p>
-                <p className="text-xs mt-1">Зеркально относительно середины: если ходил первым — станет последним.</p>
+                <p className="text-xs mt-1">Зеркально относительно середины. Действует только в текущем раунде.</p>
+                {unit.hasWaited && <p className="text-xs text-red-400 mt-1">Уже использовано в этом раунде</p>}
               </TooltipContent>
             </Tooltip>
 
-            {/* Defend */}
+            {/* Defend - requires both points */}
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   onClick={onDefend}
-                  disabled={!onDefend || unit.hasActed}
+                  disabled={!onDefend || unit.hasActed || unit.hasMoved}
                   className={cn(
-                    'w-9 h-9 flex items-center justify-center rounded-lg border-2 transition-all flex-shrink-0',
-                    onDefend && !unit.hasActed
+                    'w-10 h-10 flex items-center justify-center rounded-lg border-2 transition-all flex-shrink-0',
+                    onDefend && !unit.hasActed && !unit.hasMoved
                       ? 'bg-cyan-900/30 border-cyan-500/50 hover:bg-cyan-900/50 cursor-pointer text-cyan-300'
                       : 'bg-cyan-900/10 border-cyan-500/20 opacity-50 cursor-not-allowed text-cyan-400/50'
                   )}
                 >
-                  <ShieldPlus className="w-4 h-4" />
+                  <ShieldPlus className="w-[18px] h-[18px]" />
                 </button>
               </TooltipTrigger>
               <TooltipContent className="max-w-xs">
                 <p className="font-semibold text-cyan-300">Готовность</p>
-                <p className="text-xs text-muted-foreground">Расходует очко действия</p>
+                <p className="text-xs text-muted-foreground">Расходует очко перемещения и очко действия</p>
                 <p className="text-xs mt-1">Получить +10 энергии и +1 к обеим защитам до следующего хода.</p>
               </TooltipContent>
             </Tooltip>
@@ -400,14 +401,14 @@ export const SkillPanel = ({
             <Tooltip>
               <TooltipTrigger asChild>
                 <div className={cn(
-                  "w-7 h-7 flex items-center justify-center rounded transition-all cursor-default flex-shrink-0",
+                  "w-8 h-8 flex items-center justify-center rounded transition-all cursor-default flex-shrink-0",
                   unit.reaction === 'none'
                     ? "text-muted-foreground/30"
                     : unit.reactionAvailable
                       ? "text-yellow-300 bg-yellow-900/30"
                       : "text-muted-foreground/40"
                 )}>
-                  <RefreshCcw className="w-4 h-4" />
+                  <RefreshCcw className="w-[18px] h-[18px]" />
                 </div>
               </TooltipTrigger>
               <TooltipContent>
@@ -427,12 +428,12 @@ export const SkillPanel = ({
             <Tooltip>
               <TooltipTrigger asChild>
                 <div className={cn(
-                  "w-7 h-7 flex items-center justify-center rounded transition-all cursor-default flex-shrink-0",
+                  "w-8 h-8 flex items-center justify-center rounded transition-all cursor-default flex-shrink-0",
                   !unit.hasMoved 
                     ? "text-green-300 bg-green-900/30" 
                     : "text-muted-foreground/40"
                 )}>
-                  <Footprints className="w-4 h-4" />
+                  <Footprints className="w-[18px] h-[18px]" />
                 </div>
               </TooltipTrigger>
               <TooltipContent>
@@ -447,12 +448,12 @@ export const SkillPanel = ({
             <Tooltip>
               <TooltipTrigger asChild>
                 <div className={cn(
-                  "w-7 h-7 flex items-center justify-center rounded transition-all cursor-default flex-shrink-0",
+                  "w-8 h-8 flex items-center justify-center rounded transition-all cursor-default flex-shrink-0",
                   !unit.hasActed 
                     ? "text-orange-300 bg-orange-900/30" 
                     : "text-muted-foreground/40"
                 )}>
-                  <Hand className="w-4 h-4" />
+                  <Hand className="w-[18px] h-[18px]" />
                 </div>
               </TooltipTrigger>
               <TooltipContent>

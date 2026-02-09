@@ -1,6 +1,7 @@
-import { Hero } from '@/data/heroes';
+import { Hero, traitLabels, reactionLabels } from '@/data/heroes';
 import { cn } from '@/lib/utils';
-import { Swords, Sparkles, Shield } from 'lucide-react';
+import { Swords, Sparkles, Shield, Heart, Zap, Wind, Gauge, Eye, RefreshCcw } from 'lucide-react';
+import { getSkillIcon } from './SkillIcons';
 
 interface HeroCardProps {
   hero: Hero;
@@ -58,49 +59,82 @@ export const HeroCard = ({ hero, onClick, selected, disabled, compact }: HeroCar
       )}
     >
       {/* Avatar section */}
-      <div className="h-24 bg-gradient-to-b from-muted to-card flex items-center justify-center relative overflow-hidden">
-        <span className="text-5xl group-hover:scale-110 transition-transform duration-300">
+      <div className="h-20 bg-gradient-to-b from-muted to-card flex items-center justify-center relative overflow-hidden">
+        <span className="text-4xl group-hover:scale-110 transition-transform duration-300">
           {hero.avatar}
         </span>
-        <div className="absolute top-2 right-2">
-          <span className={cn('role-badge', roleClass)}>{roleLabel}</span>
+        <div className="absolute top-1.5 right-1.5">
+          <span className={cn('role-badge text-[9px]', roleClass)}>{roleLabel}</span>
         </div>
-        <div className="absolute top-2 left-2">
-          <span className="text-xs bg-muted/80 px-1.5 py-0.5 rounded" title={rangeLabel}>
+        <div className="absolute top-1.5 left-1.5">
+          <span className="text-[9px] bg-muted/80 px-1 py-0.5 rounded" title={rangeLabel}>
             {rangeIcon} {hero.range}
           </span>
         </div>
       </div>
 
       {/* Info section */}
-      <div className="p-3">
-        <h3 className="font-display font-semibold text-foreground text-sm">{hero.name}</h3>
-        <p className="text-xs text-muted-foreground mb-2">{hero.title}</p>
+      <div className="p-2">
+        <h3 className="font-display font-semibold text-foreground text-xs leading-tight">{hero.name}</h3>
+        <p className="text-[9px] text-muted-foreground mb-1.5">{hero.title}</p>
 
-        {/* Stats preview */}
-        <div className="grid grid-cols-2 gap-1 text-xs">
-          <div className="flex items-center gap-1">
-            <span className="text-health">❤️</span>
+        {/* Stats grid */}
+        <div className="grid grid-cols-2 gap-0.5 text-[9px] mb-1.5">
+          <div className="flex items-center gap-0.5">
+            <Heart className="w-2.5 h-2.5 text-health flex-shrink-0" />
             <span>{hero.health}</span>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-0.5">
             {hero.attackType === 'physical' ? (
-              <Swords className="w-3 h-3 text-orange-400" />
+              <Swords className="w-2.5 h-2.5 text-orange-400 flex-shrink-0" />
             ) : (
-              <Sparkles className="w-3 h-3 text-violet-400" />
+              <Sparkles className="w-2.5 h-2.5 text-violet-400 flex-shrink-0" />
             )}
             <span>{hero.attack}</span>
           </div>
-          <div className="flex items-center gap-1">
-            <Shield className="w-3 h-3 text-orange-400" />
+          <div className="flex items-center gap-0.5">
+            <Shield className="w-2.5 h-2.5 text-orange-400 flex-shrink-0" />
             <span>{hero.physicalDefense}</span>
-            <Shield className="w-3 h-3 text-violet-400 ml-1" />
+            <span className="text-muted-foreground/50">/</span>
+            <Shield className="w-2.5 h-2.5 text-violet-400 flex-shrink-0" />
             <span>{hero.magicalDefense}</span>
           </div>
-          <div className="flex items-center gap-1">
-            <span className="text-primary">⚡</span>
+          <div className="flex items-center gap-0.5">
+            <Gauge className="w-2.5 h-2.5 text-primary flex-shrink-0" />
             <span>{hero.initiative}</span>
+            <Wind className="w-2.5 h-2.5 text-support flex-shrink-0 ml-0.5" />
+            <span>{hero.speed}</span>
           </div>
+        </div>
+
+        {/* Trait & Reaction */}
+        <div className="flex gap-1 text-[8px] mb-1.5">
+          {hero.trait !== 'none' && (
+            <span className="flex items-center gap-0.5 px-1 py-0.5 bg-amber-900/20 border border-amber-500/30 rounded text-amber-400">
+              <Eye className="w-2 h-2" />
+              {traitLabels[hero.trait]}
+            </span>
+          )}
+          {hero.reaction !== 'none' && (
+            <span className="flex items-center gap-0.5 px-1 py-0.5 bg-yellow-900/20 border border-yellow-500/30 rounded text-yellow-400">
+              <RefreshCcw className="w-2 h-2" />
+              {reactionLabels[hero.reaction]}
+            </span>
+          )}
+        </div>
+
+        {/* Skills */}
+        <div className="flex gap-1 items-center">
+          <div className="flex items-center gap-0.5 text-sky-300" title={hero.skills.passive.name}>
+            {getSkillIcon(hero.skills.passive.id, 'sm')}
+          </div>
+          <div className="flex items-center gap-0.5 text-amber-400" title={hero.skills.active.name}>
+            {getSkillIcon(hero.skills.active.id, 'sm')}
+          </div>
+          <div className="flex items-center gap-0.5 text-purple-400" title={hero.skills.ultimate.name}>
+            {getSkillIcon(hero.skills.ultimate.id, 'sm')}
+          </div>
+          <span className="text-[8px] text-muted-foreground ml-auto">{hero.skills.ultimate.energyCost}⚡</span>
         </div>
       </div>
     </div>

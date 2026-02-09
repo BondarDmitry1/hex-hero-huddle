@@ -14,6 +14,8 @@ export interface BattleUnit extends Hero {
   hasActed: boolean;
   isDead: boolean;
   reactionAvailable: boolean;
+  rangedBlocked: boolean; // Can't use ranged attacks (started turn adjacent to enemy)
+  hasWaited?: boolean; // Track if unit used Wait this round
   buffs?: { type: string; duration: number; value?: number }[];
 }
 
@@ -194,18 +196,20 @@ export const useGameStore = create<GameState>((set, get) => ({
       hasActed: false,
       isDead: false,
       reactionAvailable: hero.reaction !== 'none',
+      rangedBlocked: false,
     }));
     
     const enemyUnits: BattleUnit[] = state.enemyDraft.map((hero, index) => ({
       ...hero,
       owner: 'enemy' as Player,
-      position: { q: 9, r: 1 + index * 2 },
+      position: { q: 11, r: 1 + index * 2 },
       currentHealth: hero.health,
       currentEnergy: 0,
       hasMoved: false,
       hasActed: false,
       isDead: false,
       reactionAvailable: hero.reaction !== 'none',
+      rangedBlocked: false,
     }));
     
     const allUnits = [...playerUnits, ...enemyUnits];
@@ -327,13 +331,9 @@ export const useGameStore = create<GameState>((set, get) => ({
     let forcedMelee = false;
     let hasDamagePenalty = false;
     if (attacker.attackRange === 'ranged') {
-      const allEnemyUnits = attacker.owner === 'player' ? state.enemyUnits : state.playerUnits;
-      const isBlocked = allEnemyUnits.some(e => {
-        if (!e.position || e.isDead) return false;
-        return hexDistance(attacker.position!, e.position) === 1;
-      });
-      
-      if (isBlocked) {
+      // Check if ranged is blocked (started turn adjacent to enemy)
+      if (attacker.rangedBlocked) {
+        // Can only melee adjacent
         if (distance === 1) {
           if (attacker.trait !== 'no_melee_penalty') {
             damage = Math.floor(damage / 3);
@@ -384,7 +384,6 @@ export const useGameStore = create<GameState>((set, get) => ({
     const attackerUpdates: Partial<BattleUnit> = { 
       hasActed: true, 
       currentEnergy: attackerEnergy,
-      ...(isRangedNonMelee ? { hasMoved: true } : {}),
     };
     if (attacker.owner === 'player') {
       set({ playerUnits: updateUnit(state.playerUnits, attacker.id, attackerUpdates) });
@@ -469,7 +468,7 @@ export const useGameStore = create<GameState>((set, get) => ({
             const allUnits = [...state.playerUnits, ...state.enemyUnits];
             const isOccupied = (q: number, r: number) => 
               allUnits.some(u => u.position?.q === q && u.position?.r === r && !u.isDead) ||
-              q < 0 || q >= 10 || r < 0 || r >= 10;
+              q < 0 || q >= 12 || r < 0 || r >= 11;
             
             let retreatPos: { q: number; r: number } | null = null;
             
@@ -540,7 +539,7 @@ export const useGameStore = create<GameState>((set, get) => ({
     if (attacker.attackRange === 'ranged') {
       if (forcedMelee) {
         distanceText = attacker.trait === 'no_melee_penalty' ? '' : ' (ближний бой -66%)';
-      } else if (distance > 5) {
+      } else if (distance > attacker.range) {
         distanceText = ' (дальность -50%)';
       }
     }
@@ -597,16 +596,60 @@ export const useGameStore = create<GameState>((set, get) => ({
     } while (state.turnOrder[nextIndex]?.isDead && attempts < state.turnOrder.length);
     
     if (nextIndex <= state.currentUnitIndex || attempts >= state.turnOrder.length) {
-      const resetUnits = (units: BattleUnit[]) =>
-        units.map(u => ({ ...u, hasMoved: false, hasActed: false }));
+      // New round - reset units and restore original initiative order
+      const allAliveUnits = [...state.playerUnits, ...state.enemyUnits].filter(u => !u.isDead);
+      
+      // Check for ranged units starting adjacent to enemies
+      const checkRangedBlocked = (unit: BattleUnit, enemies: BattleUnit[]): boolean => {
+        if (unit.attackRange !== 'ranged' || !unit.position) return false;
+        return enemies.some(e => e.position && !e.isDead && hexDistance(unit.position!, e.position) === 1);
+      };
+      
+      const resetUnits = (units: BattleUnit[], enemies: BattleUnit[]) =>
+        units.map(u => ({ 
+          ...u, 
+          hasMoved: false, 
+          hasActed: false, 
+          hasWaited: false,
+          rangedBlocked: checkRangedBlocked(u, enemies),
+        }));
+      
+      const newPlayerUnits = resetUnits(state.playerUnits, state.enemyUnits);
+      const newEnemyUnits = resetUnits(state.enemyUnits, state.playerUnits);
+      
+      // Restore original initiative order for new round
+      const allUnitsForOrder = [...newPlayerUnits, ...newEnemyUnits];
+      const newTurnOrder = [...allUnitsForOrder].sort((a, b) => b.initiative - a.initiative);
       
       set({
-        playerUnits: resetUnits(state.playerUnits),
-        enemyUnits: resetUnits(state.enemyUnits),
-        turnOrder: resetUnits(state.turnOrder),
+        playerUnits: newPlayerUnits,
+        enemyUnits: newEnemyUnits,
+        turnOrder: newTurnOrder,
       });
       
+      // Find first alive unit in new order
+      nextIndex = 0;
+      while (newTurnOrder[nextIndex]?.isDead && nextIndex < newTurnOrder.length) {
+        nextIndex++;
+      }
+      
       get().addBattleLog('🔄 Новый раунд!');
+    } else {
+      // Check rangedBlocked for next unit at start of their turn
+      const nextUnit = state.turnOrder[nextIndex];
+      if (nextUnit && nextUnit.attackRange === 'ranged' && nextUnit.position) {
+        const enemies = nextUnit.owner === 'player' ? state.enemyUnits : state.playerUnits;
+        const isBlocked = enemies.some(e => e.position && !e.isDead && hexDistance(nextUnit.position!, e.position) === 1);
+        if (isBlocked !== nextUnit.rangedBlocked) {
+          const updateBlocked = (units: BattleUnit[]) =>
+            units.map(u => u.id === nextUnit.id ? { ...u, rangedBlocked: isBlocked } : u);
+          set(s => ({
+            playerUnits: updateBlocked(s.playerUnits),
+            enemyUnits: updateBlocked(s.enemyUnits),
+            turnOrder: updateBlocked(s.turnOrder),
+          }));
+        }
+      }
     }
     
     set({
@@ -617,9 +660,12 @@ export const useGameStore = create<GameState>((set, get) => ({
     });
   },
   
-  // Wait action
+  // Wait action - only works once per round
   waitAction: (unit) => {
     const state = get();
+    
+    if (unit.hasWaited) return; // Already waited this round
+    
     const aliveUnits = state.turnOrder.filter(u => !u.isDead);
     const currentPosInAlive = aliveUnits.findIndex(u => u.id === unit.id);
     
@@ -629,20 +675,31 @@ export const useGameStore = create<GameState>((set, get) => ({
     
     const newAliveOrder = [...aliveUnits];
     newAliveOrder.splice(currentPosInAlive, 1);
-    newAliveOrder.splice(mirroredPos, 0, unit);
+    const waitedUnit = { ...unit, hasWaited: true };
+    newAliveOrder.splice(mirroredPos, 0, waitedUnit);
     
     const deadUnits = state.turnOrder.filter(u => u.isDead);
     const finalTurnOrder = [...newAliveOrder, ...deadUnits];
     
-    set({ turnOrder: finalTurnOrder });
+    // Also update the hasWaited flag in unit arrays
+    const updateWaited = (units: BattleUnit[]) =>
+      units.map(u => u.id === unit.id ? { ...u, hasWaited: true } : u);
+    
+    set({ 
+      turnOrder: finalTurnOrder,
+      playerUnits: updateWaited(state.playerUnits),
+      enemyUnits: updateWaited(state.enemyUnits),
+    });
     
     get().addBattleLog(`⏳ ${unit.avatar} ${unit.name} ждёт...`);
     get().endTurn();
   },
   
-  // Defend action
+  // Defend action - requires both movement and action points
   defendAction: (unit) => {
     const state = get();
+    
+    if (unit.hasMoved || unit.hasActed) return; // Needs both points
     
     const newEnergy = Math.min(unit.maxEnergy, unit.currentEnergy + 10);
     const newBuffs = [...(unit.buffs || []), { type: 'defense_boost', duration: 1, value: 1 }];
@@ -650,7 +707,7 @@ export const useGameStore = create<GameState>((set, get) => ({
     const updateUnit = (units: BattleUnit[], unitId: string, updates: Partial<BattleUnit>) =>
       units.map(u => u.id === unitId ? { ...u, ...updates } : u);
     
-    const updates = { hasActed: true, currentEnergy: newEnergy, buffs: newBuffs };
+    const updates = { hasMoved: true, hasActed: true, currentEnergy: newEnergy, buffs: newBuffs };
     
     if (unit.owner === 'player') {
       set({ playerUnits: updateUnit(state.playerUnits, unit.id, updates) });
