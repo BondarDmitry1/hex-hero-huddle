@@ -201,46 +201,46 @@
   }
 
   .reaction-popup {
-    animation: reaction-float 2s ease-out forwards;
+    animation: reaction-float 1.2s ease-out forwards;
   }
 
   @keyframes reaction-float {
     0% {
       opacity: 0;
-      transform: translateY(0) scale(0.5);
+      transform: translateY(0) scale(0.8);
     }
-    10% {
+    15% {
       opacity: 1;
-      transform: translateY(-5px) scale(1.3);
+      transform: translateY(-4px) scale(1);
     }
-    35% {
+    60% {
       opacity: 1;
-      transform: translateY(-20px) scale(1);
+      transform: translateY(-25px) scale(1);
     }
     100% {
       opacity: 0;
-      transform: translateY(-45px) scale(0.8);
+      transform: translateY(-40px) scale(0.9);
     }
   }
 
   .melee-shake {
-    animation: melee-shake 0.6s ease-out;
+    animation: melee-shake 0.5s ease-out;
   }
 
   .melee-impact {
-    animation: melee-impact 0.8s ease-out forwards;
+    animation: melee-impact 0.4s ease-out forwards;
   }
 
   .projectile-trail {
-    animation: trail-fade 0.7s ease-out forwards;
+    animation: trail-fade 0.6s ease-out forwards;
   }
 
-  .projectile-move {
-    animation: projectile-smooth 0.7s cubic-bezier(0.25, 0.1, 0.25, 1) forwards;
+  .projectile-fly-to-target {
+    animation: fly-to-target 0.6s cubic-bezier(0.2, 0, 0.3, 1) forwards;
   }
 
   .damage-popup-smooth {
-    animation: damage-smooth 2s ease-out forwards;
+    animation: damage-float-up 1.4s ease-out forwards;
   }
 
   .stat-bar {
@@ -335,32 +335,37 @@
 
 @keyframes trail-fade {
   0% { opacity: 0; stroke-dasharray: 0, 100; }
-  30% { opacity: 1; stroke-dasharray: 100, 0; }
-  100% { opacity: 0.7; stroke-dasharray: 100, 0; }
+  30% { opacity: 0.6; stroke-dasharray: 100, 0; }
+  100% { opacity: 0; stroke-dasharray: 100, 0; }
 }
 
-@keyframes projectile-smooth {
-  0% { opacity: 0; transform: scale(0.5); }
-  40% { opacity: 1; transform: scale(1.1); }
-  100% { opacity: 1; transform: scale(1); }
+@keyframes fly-to-target {
+  0% {
+    transform: translate(0, 0);
+    opacity: 0.8;
+  }
+  100% {
+    transform: translate(var(--dx), var(--dy));
+    opacity: 1;
+  }
 }
 
-@keyframes damage-smooth {
+@keyframes damage-float-up {
   0% {
     opacity: 0;
-    transform: translateY(0) scale(0.5);
+    transform: translateY(0) scale(0.8);
   }
-  15% {
+  12% {
     opacity: 1;
-    transform: translateY(-8px) scale(1.2);
+    transform: translateY(-5px) scale(1.1);
   }
-  40% {
+  50% {
     opacity: 1;
     transform: translateY(-25px) scale(1);
   }
   100% {
     opacity: 0;
-    transform: translateY(-50px) scale(0.8);
+    transform: translateY(-45px) scale(0.85);
   }
 }
 
