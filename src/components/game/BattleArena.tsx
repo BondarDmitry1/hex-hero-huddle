@@ -39,6 +39,7 @@ export const BattleArena = () => {
   const [attackAnimations, setAttackAnimations] = useState<AttackAnimation[]>([]);
   const [meleeShakeUnits, setMeleeShakeUnits] = useState<MeleeShakeUnit[]>([]);
   const [reactionPopups, setReactionPopups] = useState<ReactionPopup[]>([]);
+  const [animationLock, setAnimationLock] = useState(false);
   const popupIdRef = useRef(0);
   
   const allUnits = useMemo(() => [...playerUnits, ...enemyUnits], [playerUnits, enemyUnits]);
@@ -97,9 +98,9 @@ export const BattleArena = () => {
   // Skill emoji mapping
   const getSkillEmoji = useCallback((skillId: string): string => {
     const map: Record<string, string> = {
-      shield_wall: '🛡️', fortress: '🏰', earthquake: '🌍', mountain_form: '⛰️',
+      maneuvers: '🏃', shield_bash: '🛡️', earthquake: '🌍', mountain_form: '⛰️',
       holy_strike: '⚜️', divine_judgement: '⚡', shadow_step: '🗡️', dance_of_blades: '⚔️',
-      fireball: '🔥', meteor_storm: '☄️', piercing_shot: '🏹', arrow_rain: '🌧️',
+      fireball: '🔥', meteor_storm: '☄️', entangle: '🌿', precise_shot: '🎯',
       whirlwind: '🌪️', rampage: '🪓', ice_lance: '❄️', blizzard: '🌨️',
       healing_light: '✨', divine_intervention: '👼', war_cry: '📯', drums_of_war: '🥁',
       dark_pact: '💀', army_of_dead: '☠️', totem_of_protection: '🌩️', storm_call: '⚡',
@@ -120,6 +121,7 @@ export const BattleArena = () => {
       return;
     }
 
+    setAnimationLock(true);
     const from = hexToPixel(attacker.position.q, attacker.position.r);
     const to = hexToPixel(target.position.q, target.position.r);
     const id = `attack-${popupIdRef.current++}`;
@@ -200,6 +202,7 @@ export const BattleArena = () => {
       showReactionPopup(targetPos);
       setTimeout(() => {
         showDamagePopup(targetPos, result.damage, result.isCrit, false);
+        setTimeout(() => setAnimationLock(false), 1400);
       }, 800);
     } else {
       // Normal: damage immediately from target center upward
@@ -219,9 +222,17 @@ export const BattleArena = () => {
                 !!result.reaction!.isMelee, result.reaction!.reactorId, result.reaction!.damage!,
                 reactor?.avatar
               );
+              // Unlock after reaction attack animation + damage popup
+              setTimeout(() => setAnimationLock(false), 1600);
             }, 800);
+          } else {
+            // Reaction without attack (retreat) - unlock after reaction popup
+            setTimeout(() => setAnimationLock(false), 1200);
           }
         }, 1200);
+      } else {
+        // No reaction - unlock after damage popup
+        setTimeout(() => setAnimationLock(false), 1400);
       }
     }
   }, [showReactionPopup, showDamagePopup, showReactionAttackAnimation]);
@@ -249,7 +260,7 @@ export const BattleArena = () => {
 
   // AI for enemy turns
   useEffect(() => {
-    if (currentUnit && currentUnit.owner === 'enemy' && !currentUnit.isDead && !gameOver) {
+    if (currentUnit && currentUnit.owner === 'enemy' && !currentUnit.isDead && !gameOver && !animationLock) {
       const timer = setTimeout(() => {
         // Check if enemy ranged unit is blocked by debuff
         const enemyIsBlocked = currentUnit.rangedBlocked;
@@ -282,41 +293,56 @@ export const BattleArena = () => {
               }
             }, !!isForcedMelee);
             
-            setTimeout(() => {
-              // Use fresh state to check if can still move (ranged attack consumes movement)
-              const freshState = useGameStore.getState();
-              const freshUnit = freshState.turnOrder[freshState.currentUnitIndex];
-              if (freshUnit && !freshUnit.hasMoved) {
-                const freshAllUnits = [...freshState.playerUnits, ...freshState.enemyUnits];
-                const range = getMovementRange(freshUnit, freshAllUnits, obstacles, GRID_WIDTH, GRID_HEIGHT);
-                if (range.size > 0) {
-                  const rangeArray = Array.from(range);
-                  let bestPos = rangeArray[0];
-                  let bestDist = Infinity;
-                  
-                  for (const pos of rangeArray) {
-                    const [q, r] = pos.split(',').map(Number);
-                    for (const t of alivePlayerUnits) {
-                      if (t.position) {
-                        const dist = hexDistance({ q, r }, t.position);
-                        if (dist < bestDist) {
-                          bestDist = dist;
-                          bestPos = pos;
+            // Wait for animation lock to clear before continuing AI turn
+            const waitForAnimEnd = () => {
+              const checkInterval = setInterval(() => {
+                // Check if animations are done by looking at current state
+                const freshState = useGameStore.getState();
+                const freshUnit = freshState.turnOrder[freshState.currentUnitIndex];
+                
+                clearInterval(checkInterval);
+                
+                if (freshUnit && !freshUnit.hasMoved) {
+                  const freshAllUnits = [...freshState.playerUnits, ...freshState.enemyUnits];
+                  const range = getMovementRange(freshUnit, freshAllUnits, obstacles, GRID_WIDTH, GRID_HEIGHT);
+                  if (range.size > 0) {
+                    const rangeArray = Array.from(range);
+                    let bestPos = rangeArray[0];
+                    let bestDist = Infinity;
+                    
+                    for (const pos of rangeArray) {
+                      const [q, r] = pos.split(',').map(Number);
+                      for (const t of alivePlayerUnits) {
+                        if (t.position) {
+                          const dist = hexDistance({ q, r }, t.position);
+                          if (dist < bestDist) {
+                            bestDist = dist;
+                            bestPos = pos;
+                          }
                         }
                       }
                     }
-                  }
-                  
-                  const [q, r] = bestPos.split(',').map(Number);
-                  const moveResult = moveUnit(freshUnit, { q, r });
-                  if (moveResult?.provokedAttack) {
-                    handleProvokedAnimation(moveResult.provokedAttack);
+                    
+                    const [q, r] = bestPos.split(',').map(Number);
+                    const moveResult = moveUnit(freshUnit, { q, r });
+                    if (moveResult?.provokedAttack) {
+                      handleProvokedAnimation(moveResult.provokedAttack);
+                    }
                   }
                 }
-              }
-              
-              setTimeout(() => endTurn(), 400);
-            }, 500);
+                
+                // Wait for any remaining animations
+                setTimeout(() => {
+                  const waitEnd = setInterval(() => {
+                    clearInterval(waitEnd);
+                    endTurn();
+                  }, 300);
+                }, 500);
+              }, 200);
+            };
+            
+            // Start waiting after a minimum delay for projectile
+            setTimeout(waitForAnimEnd, 800);
             return;
           }
         }
@@ -355,10 +381,10 @@ export const BattleArena = () => {
       
       return () => clearTimeout(timer);
     }
-  }, [currentUnit, allUnits, obstacles, moveUnit, endTurn, attackUnit, alivePlayerUnits, gameOver, showAttackAnimation, showDamagePopup, handleAttackResult, handleProvokedAnimation]);
+  }, [currentUnit, allUnits, obstacles, moveUnit, endTurn, attackUnit, alivePlayerUnits, gameOver, showAttackAnimation, showDamagePopup, handleAttackResult, handleProvokedAnimation, animationLock]);
 
   const handleHexClick = useCallback((q: number, r: number) => {
-    if (!currentUnit || currentUnit.owner !== 'player' || gameOver) return;
+    if (!currentUnit || currentUnit.owner !== 'player' || gameOver || animationLock) return;
 
     const key = `${q},${r}`;
     const clickedUnit = allUnits.find(u => u.position?.q === q && u.position?.r === r && !u.isDead);
@@ -496,7 +522,7 @@ export const BattleArena = () => {
         handleProvokedAnimation(moveResult.provokedAttack);
       }
     }
-  }, [currentUnit, allUnits, selectedUnit, movementRange, moveUnit, attackUnit, setSelectedUnit, gameOver, showAttackAnimation, showDamagePopup, skillMode, skillRange, setSkillMode, setSkillRange, useSkill, hexToPixel, isRangedBlocked, obstacles, markUnitActed, handleAttackResult, handleProvokedAnimation, showMeleeShake, getSkillEmoji]);
+  }, [currentUnit, allUnits, selectedUnit, movementRange, moveUnit, attackUnit, setSelectedUnit, gameOver, showAttackAnimation, showDamagePopup, skillMode, skillRange, setSkillMode, setSkillRange, useSkill, hexToPixel, isRangedBlocked, obstacles, markUnitActed, handleAttackResult, handleProvokedAnimation, showMeleeShake, getSkillEmoji, animationLock]);
 
   const handleHexHover = useCallback((q: number, r: number, unit: BattleUnit | null) => {
     // Set hovered unit for showing info panel on right
@@ -507,7 +533,7 @@ export const BattleArena = () => {
     }
   }, [setHoveredUnit]);
 
-  const handleEndTurn = () => endTurn();
+  const handleEndTurn = () => { if (!animationLock) endTurn(); };
 
   const handleUseSkill = useCallback((skillType: 'active' | 'ultimate') => {
     if (!currentUnit || currentUnit.hasActed) return;
@@ -516,6 +542,8 @@ export const BattleArena = () => {
     if (skillType === 'ultimate') {
       const energyCost = currentUnit.skills.ultimate.energyCost || 100;
       if (currentUnit.currentEnergy < energyCost) return;
+      // Elf archer ult costs movement point
+      if (currentUnit.id === 'elf_archer' && currentUnit.hasMoved) return;
     }
     
     // Toggle skill mode
@@ -531,9 +559,43 @@ export const BattleArena = () => {
     const newRange = new Set<string>();
     if (currentUnit.position) {
       const isSupport = currentUnit.role === 'support';
-      const isSelfBuff = ['ironclad', 'stone_giant', 'paladin', 'berserker'].includes(currentUnit.id);
+      const isSelfBuff = ['stone_giant', 'paladin', 'berserker'].includes(currentUnit.id);
       
-      if (isSupport && skillType === 'active' && currentUnit.id === 'light_priestess') {
+      // Knight active: target self or allies at range 5
+      if (currentUnit.id === 'knight' && skillType === 'active') {
+        const ownUnits = currentUnit.owner === 'player' ? playerUnits : enemyUnits;
+        ownUnits.filter(u => !u.isDead && u.position).forEach(u => {
+          if (u.position) {
+            const dist = hexDistance(currentUnit.position!, u.position);
+            if (dist <= 5) {
+              newRange.add(`${u.position.q},${u.position.r}`);
+            }
+          }
+        });
+      // Knight ult: target enemy at range 1
+      } else if (currentUnit.id === 'knight' && skillType === 'ultimate') {
+        enemyUnits.filter(u => !u.isDead && u.position).forEach(u => {
+          if (u.position) {
+            const dist = hexDistance(currentUnit.position!, u.position);
+            if (dist <= 1) {
+              newRange.add(`${u.position.q},${u.position.r}`);
+            }
+          }
+        });
+      // Elf archer active: target enemy at range 6
+      } else if (currentUnit.id === 'elf_archer' && skillType === 'active') {
+        enemyUnits.filter(u => !u.isDead && u.position).forEach(u => {
+          if (u.position) {
+            const dist = hexDistance(currentUnit.position!, u.position);
+            if (dist <= 6) {
+              newRange.add(`${u.position.q},${u.position.r}`);
+            }
+          }
+        });
+      // Elf archer ult: self-buff
+      } else if (currentUnit.id === 'elf_archer' && skillType === 'ultimate') {
+        newRange.add(`${currentUnit.position.q},${currentUnit.position.r}`);
+      } else if (isSupport && skillType === 'active' && currentUnit.id === 'light_priestess') {
         playerUnits.filter(u => !u.isDead && u.position).forEach(u => {
           if (u.position) {
             const dist = hexDistance(currentUnit.position!, u.position);
