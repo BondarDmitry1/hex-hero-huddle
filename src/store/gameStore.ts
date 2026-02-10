@@ -367,7 +367,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       damage = Math.floor(damage / 2);
     }
     
-    const isCrit = Math.random() < 0.1;
+    const isCrit = Math.random() < 0.15;
     if (isCrit) {
       damage = Math.floor(damage * 1.5);
     }
@@ -775,22 +775,40 @@ export const useGameStore = create<GameState>((set, get) => ({
     const allies = caster.owner === 'player' ? state.playerUnits : state.enemyUnits;
     
     switch (caster.id) {
-      case 'ironclad':
+      case 'knight':
       case 'stone_giant':
       case 'paladin':
         if (skillType === 'active') {
-          const areaTargets = enemies.filter(e => {
-            if (!e.position || !caster.position) return false;
-            return hexDistance(caster.position, e.position) <= 2 && !e.isDead;
-          });
-          areaTargets.forEach(t => {
-            const damage = Math.floor(caster.attack * 0.6);
-            targets.push({ unit: t, value: damage });
-          });
-          result = { type: 'area', targets, message: `${caster.avatar} использует ${skill.name}!` };
+          // Knight: Maneuvers - buff speed of self or ally
+          if (caster.id === 'knight') {
+            const allyTarget = allies.find(a => 
+              a.position?.q === targetPos.q && a.position?.r === targetPos.r && !a.isDead
+            );
+            if (allyTarget) {
+              targets.push({ unit: allyTarget, value: 2 });
+              result = { type: 'buff', targets, message: `${caster.avatar} использует ${skill.name} на ${allyTarget.name}!` };
+            }
+          } else {
+            const areaTargets = enemies.filter(e => {
+              if (!e.position || !caster.position) return false;
+              return hexDistance(caster.position, e.position) <= 2 && !e.isDead;
+            });
+            areaTargets.forEach(t => {
+              const damage = Math.floor(caster.attack * 0.6);
+              targets.push({ unit: t, value: damage });
+            });
+            result = { type: 'area', targets, message: `${caster.avatar} использует ${skill.name}!` };
+          }
         } else {
-          targets.push({ unit: caster, value: 50 });
-          result = { type: 'buff', targets, message: `${caster.avatar} активирует ${skill.name}!` };
+          if (caster.id === 'knight' && target) {
+            // Shield Bash: 50 damage + stun
+            const damage = 50;
+            targets.push({ unit: target, value: damage });
+            result = { type: 'damage', targets, message: `${caster.avatar} наносит ${skill.name}!` };
+          } else {
+            targets.push({ unit: caster, value: 50 });
+            result = { type: 'buff', targets, message: `${caster.avatar} активирует ${skill.name}!` };
+          }
         }
         break;
         
@@ -827,11 +845,15 @@ export const useGameStore = create<GameState>((set, get) => ({
         }
         break;
         
-      case 'ranger':
-        if (target) {
-          const damage = skillType === 'ultimate' ? Math.floor(caster.attack * 1.3) : Math.floor(caster.attack * 1.1);
-          targets.push({ unit: target, value: damage });
-          result = { type: 'damage', targets, message: `${caster.avatar} выпускает ${skill.name}!` };
+      case 'elf_archer':
+        if (skillType === 'active' && target) {
+          // Entangle: immobilize for 1 turn
+          targets.push({ unit: target, value: 0 });
+          result = { type: 'buff', targets, message: `${caster.avatar} опутывает ${target.name}!` };
+        } else if (skillType === 'ultimate') {
+          // Precise Shot: self-buff (next shot guaranteed crit, no range penalty)
+          targets.push({ unit: caster, value: 0 });
+          result = { type: 'buff', targets, message: `${caster.avatar} активирует ${skill.name}!` };
         }
         break;
         
