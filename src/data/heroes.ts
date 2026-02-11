@@ -105,12 +105,95 @@ export const statusEffectIcons: Record<StatusEffectType, string> = {
   ranged_blocked: '🚫',
 };
 
+// ===== SKILL EFFECT SYSTEM =====
+
+export interface SkillEffect {
+  /** Who the skill targets */
+  target: 'enemy' | 'ally' | 'self' | 'all_enemies' | 'all_allies';
+  /** Flat damage amount */
+  damage?: number;
+  /** Damage as multiplier of caster's attack */
+  damageMultiplier?: number;
+  /** Damage type (defaults to caster's attackType) */
+  damageType?: 'physical' | 'magical';
+  /** Status effect to apply */
+  status?: StatusEffectType;
+  /** Duration of status effect */
+  statusDuration?: number;
+  /** Stacks of status effect */
+  statusStacks?: number;
+  /** Area of effect radius in hexes */
+  area?: number;
+  /** Temporary stat buffs to apply */
+  statBuffs?: {
+    stat: 'attack' | 'speed' | 'physicalDefense' | 'magicalDefense' | 'initiative';
+    value: number;
+    isPercent?: boolean;
+    duration: number;
+  }[];
+  /** Flat heal amount */
+  heal?: number;
+  /** Heal as % of maxHealth */
+  healPercent?: number;
+  /** Self-damage (flat) */
+  selfDamage?: number;
+  /** Self-damage as % of maxHealth */
+  selfDamagePercent?: number;
+  /** Guarantees next attack is critical */
+  guaranteedCrit?: boolean;
+  /** Removes range penalty from next attack */
+  ignoreRangePenalty?: boolean;
+  /** Skill range override (default uses hero range) */
+  range?: number;
+  /** Costs movement point instead of/in addition to action */
+  costsMovementPoint?: boolean;
+  /** For truly unique effects that need minimal custom logic */
+  special?: string;
+}
+
+export interface PassiveEffect {
+  /** When this passive triggers */
+  trigger: 'aura' | 'on_attack' | 'on_hit' | 'on_parry' | 'always';
+  /** Aura/area radius */
+  area?: number;
+  /** Who is affected */
+  target?: 'allies' | 'enemies' | 'self';
+  /** Stat modifications */
+  statBuffs?: {
+    stat: 'attack' | 'speed' | 'physicalDefense' | 'magicalDefense' | 'initiative';
+    value: number;
+    isPercent?: boolean;
+  }[];
+  /** Ranged damage reduction for aura targets */
+  rangedDamageReduction?: number;
+  /** Heal per tick (for aura) */
+  heal?: number;
+  /** Status to apply on trigger */
+  status?: StatusEffectType;
+  /** Duration of applied status */
+  statusDuration?: number;
+  /** Chance of triggering (0-1, default 1) */
+  chance?: number;
+  /** Damage on trigger */
+  damage?: number;
+  /** Damage type */
+  damageType?: 'physical' | 'magical';
+  /** For unique passives that need custom code */
+  special?: string;
+}
+
 export interface Skill {
   id: string;
   name: string;
   description: string;
   type: 'passive' | 'active' | 'ultimate';
   energyCost?: number;
+  /** Cooldown in turns (for active skills) */
+  cooldown?: number;
+  /** Executable effect - used by the universal skill system */
+  effect?: SkillEffect;
+  /** Passive effect definition */
+  passiveEffect?: PassiveEffect;
 }
 
 export interface Hero {
@@ -124,7 +207,7 @@ export interface Hero {
   attack: number;
   attackType: DamageType;
   attackRange: AttackRange;
-  range: number; // in hexes: 1 for melee, 2-4 for ranged
+  range: number;
   physicalDefense: number;
   magicalDefense: number;
   initiative: number;
@@ -169,12 +252,25 @@ export const heroes: Hero[] = [
         name: 'Стена Щитов',
         description: 'Рыцарь и союзники в радиусе 1 получают на 30% меньше урона от дальних атак. При парировании +1 инициатива на следующий ход.',
         type: 'passive',
+        passiveEffect: {
+          trigger: 'aura',
+          area: 1,
+          target: 'allies',
+          rangedDamageReduction: 0.3,
+          special: 'on_parry_initiative',
+        },
       },
       active: {
         id: 'maneuvers',
         name: 'Маневры',
         description: 'Добавляет себе или союзнику +2 скорости на 2 хода. Дальность 5 клеток. Откат 3 хода.',
         type: 'active',
+        cooldown: 3,
+        effect: {
+          target: 'ally',
+          range: 5,
+          statBuffs: [{ stat: 'speed', value: 2, duration: 2 }],
+        },
       },
       ultimate: {
         id: 'shield_bash',
@@ -182,6 +278,14 @@ export const heroes: Hero[] = [
         description: 'Наносит 50 физического урона в ближнем бою и оглушает врага на 1 ход',
         type: 'ultimate',
         energyCost: 100,
+        effect: {
+          target: 'enemy',
+          damage: 50,
+          damageType: 'physical',
+          range: 1,
+          status: 'stunned',
+          statusDuration: 1,
+        },
       },
     },
     description: 'Благородный воин, мастер оборонительного боя. Его щит — стена для союзников.',
@@ -212,12 +316,25 @@ export const heroes: Hero[] = [
         name: 'Каменное Тело',
         description: 'Иммунитет к эффектам контроля',
         type: 'passive',
+        passiveEffect: {
+          trigger: 'always',
+          target: 'self',
+          special: 'cc_immune',
+        },
       },
       active: {
         id: 'earthquake',
         name: 'Землетрясение',
-        description: 'Наносит 15 урона всем врагам в радиусе 2 гексов и замедляет их на 1 ход',
+        description: 'Наносит 15 урона всем врагам в радиусе 2 гексов и обездвиживает на 1 ход',
         type: 'active',
+        effect: {
+          target: 'enemy',
+          damage: 15,
+          damageType: 'physical',
+          area: 2,
+          status: 'immobilized',
+          statusDuration: 1,
+        },
       },
       ultimate: {
         id: 'mountain_form',
@@ -225,6 +342,14 @@ export const heroes: Hero[] = [
         description: 'Удваивает защиту и восстанавливает 50% здоровья',
         type: 'ultimate',
         energyCost: 100,
+        effect: {
+          target: 'self',
+          healPercent: 50,
+          statBuffs: [
+            { stat: 'physicalDefense', value: 100, isPercent: true, duration: 2 },
+            { stat: 'magicalDefense', value: 100, isPercent: true, duration: 2 },
+          ],
+        },
       },
     },
     description: 'Пробуждённый дух горы, медленный но несокрушимый. Веками охранял древние руины.',
@@ -255,12 +380,25 @@ export const heroes: Hero[] = [
         name: 'Божественный Щит',
         description: 'Каждый 3-й удар по нему блокируется полностью',
         type: 'passive',
+        passiveEffect: {
+          trigger: 'on_hit',
+          target: 'self',
+          special: 'block_every_3rd',
+        },
       },
       active: {
         id: 'holy_strike',
         name: 'Святой Удар',
         description: 'Наносит 35 урона и оглушает цель на 1 ход',
         type: 'active',
+        effect: {
+          target: 'enemy',
+          damage: 35,
+          damageType: 'physical',
+          range: 1,
+          status: 'stunned',
+          statusDuration: 1,
+        },
       },
       ultimate: {
         id: 'divine_judgement',
@@ -268,6 +406,10 @@ export const heroes: Hero[] = [
         description: 'Наносит урон всем врагам равный 20% их потерянного здоровья',
         type: 'ultimate',
         energyCost: 90,
+        effect: {
+          target: 'all_enemies',
+          special: 'percent_lost_hp_damage',
+        },
       },
     },
     description: 'Благословлённый воин света. Сочетает защиту с карающей силой праведного гнева.',
@@ -300,12 +442,24 @@ export const heroes: Hero[] = [
         name: 'Удар в Спину',
         description: 'Критический удар (+50% урона) при атаке сзади',
         type: 'passive',
+        passiveEffect: {
+          trigger: 'on_attack',
+          target: 'self',
+          special: 'backstab_crit',
+        },
       },
       active: {
         id: 'shadow_step',
         name: 'Теневой Шаг',
         description: 'Телепортируется на 3 гекса и наносит 30 урона',
         type: 'active',
+        effect: {
+          target: 'enemy',
+          damage: 30,
+          damageType: 'physical',
+          range: 3,
+          special: 'teleport_to_target',
+        },
       },
       ultimate: {
         id: 'dance_of_blades',
@@ -313,6 +467,12 @@ export const heroes: Hero[] = [
         description: 'Атакует всех соседних врагов, нанося 60% урона каждому',
         type: 'ultimate',
         energyCost: 80,
+        effect: {
+          target: 'enemy',
+          damageMultiplier: 0.6,
+          damageType: 'physical',
+          area: 1,
+        },
       },
     },
     description: 'Элитный ассасин гильдии теней. Быстрый и смертоносный, появляется из ниоткуда.',
@@ -341,14 +501,26 @@ export const heroes: Hero[] = [
       passive: {
         id: 'burning',
         name: 'Горение',
-        description: 'Атаки поджигают врага, нанося 10 урона в течение 2 ходов',
+        description: 'Атаки поджигают врага, нанося 15 маг. урона в течение 2 ходов',
         type: 'passive',
+        passiveEffect: {
+          trigger: 'on_attack',
+          target: 'enemies',
+          status: 'burning',
+          statusDuration: 2,
+        },
       },
       active: {
         id: 'fireball',
         name: 'Огненный Шар',
         description: 'Наносит 40 магического урона в области 2 гекса',
         type: 'active',
+        effect: {
+          target: 'enemy',
+          damage: 40,
+          damageType: 'magical',
+          area: 2,
+        },
       },
       ultimate: {
         id: 'meteor_storm',
@@ -356,6 +528,12 @@ export const heroes: Hero[] = [
         description: 'Вызывает метеориты на 3 случайных врага, нанося 70 урона каждому',
         type: 'ultimate',
         energyCost: 90,
+        effect: {
+          target: 'all_enemies',
+          damage: 70,
+          damageType: 'magical',
+          special: 'random_3_targets',
+        },
       },
     },
     description: 'Мастер разрушительной магии огня. Его пламя сжигает всё на своём пути.',
@@ -386,12 +564,25 @@ export const heroes: Hero[] = [
         name: 'Уворот',
         description: '20% шанс увернуться от любой атаки, если не под эффектом контроля',
         type: 'passive',
+        passiveEffect: {
+          trigger: 'on_hit',
+          target: 'self',
+          chance: 0.2,
+          special: 'dodge_if_no_cc',
+        },
       },
       active: {
         id: 'entangle',
         name: 'Путы',
         description: 'Опутывает цель, обездвиживая на 1 ход. Дальность 6. Откат 2 хода.',
         type: 'active',
+        cooldown: 2,
+        effect: {
+          target: 'enemy',
+          range: 6,
+          status: 'immobilized',
+          statusDuration: 1,
+        },
       },
       ultimate: {
         id: 'precise_shot',
@@ -399,6 +590,12 @@ export const heroes: Hero[] = [
         description: 'Следующий выстрел без штрафа за расстояние и гарантированный крит. Стоит очко движения.',
         type: 'ultimate',
         energyCost: 90,
+        effect: {
+          target: 'self',
+          guaranteedCrit: true,
+          ignoreRangePenalty: true,
+          costsMovementPoint: true,
+        },
       },
     },
     description: 'Древний эльф, чей взгляд пронзает тени леса. Его стрелы не знают промаха.',
@@ -429,19 +626,38 @@ export const heroes: Hero[] = [
         name: 'Кровавая Ярость',
         description: 'Урон увеличивается на 2% за каждый потерянный 1% здоровья',
         type: 'passive',
+        passiveEffect: {
+          trigger: 'always',
+          target: 'self',
+          special: 'blood_rage_damage_boost',
+        },
       },
       active: {
         id: 'whirlwind',
         name: 'Вихрь',
         description: 'Вращается с топором, нанося 40 урона всем соседним врагам',
         type: 'active',
+        effect: {
+          target: 'enemy',
+          damage: 40,
+          damageType: 'physical',
+          area: 1,
+        },
       },
       ultimate: {
         id: 'rampage',
         name: 'Буйство',
-        description: 'Впадает в ярость: +50% урона и скорости на 2 хода, но теряет 20% HP',
+        description: 'Впадает в ярость: +50% урона и +2 скорости на 2 хода, но теряет 20% HP',
         type: 'ultimate',
         energyCost: 70,
+        effect: {
+          target: 'self',
+          selfDamagePercent: 20,
+          statBuffs: [
+            { stat: 'attack', value: 50, isPercent: true, duration: 2 },
+            { stat: 'speed', value: 2, duration: 2 },
+          ],
+        },
       },
     },
     description: 'Северный воин, черпающий силу из боевого безумия. Чем ближе к смерти, тем опаснее.',
@@ -472,19 +688,38 @@ export const heroes: Hero[] = [
         name: 'Обморожение',
         description: 'Атаки замедляют врагов на 1 скорость на 1 ход',
         type: 'passive',
+        passiveEffect: {
+          trigger: 'on_attack',
+          target: 'enemies',
+          statBuffs: [{ stat: 'speed', value: -1 }],
+          statusDuration: 1,
+        },
       },
       active: {
         id: 'ice_lance',
         name: 'Ледяное Копьё',
         description: 'Пронзает врага льдом, нанося 45 урона и замораживая на 1 ход',
         type: 'active',
+        effect: {
+          target: 'enemy',
+          damage: 45,
+          damageType: 'magical',
+          status: 'frozen',
+          statusDuration: 1,
+        },
       },
       ultimate: {
         id: 'blizzard',
         name: 'Буран',
-        description: 'Вызывает снежную бурю на 3 хода, замедляя всех врагов и нанося 20 урона/ход',
+        description: 'Вызывает снежную бурю: 20 маг. урона всем врагам и замедление на 3 хода',
         type: 'ultimate',
         energyCost: 95,
+        effect: {
+          target: 'all_enemies',
+          damage: 20,
+          damageType: 'magical',
+          statBuffs: [{ stat: 'speed', value: -1, duration: 3 }],
+        },
       },
     },
     description: 'Древняя колдунья из северных пустошей. Её взгляд несёт холод самой смерти.',
@@ -517,12 +752,23 @@ export const heroes: Hero[] = [
         name: 'Святая Аура',
         description: 'Союзники в радиусе 2 гексов восстанавливают 5 HP каждый ход',
         type: 'passive',
+        passiveEffect: {
+          trigger: 'aura',
+          area: 2,
+          target: 'allies',
+          heal: 5,
+        },
       },
       active: {
         id: 'healing_light',
         name: 'Исцеляющий Свет',
         description: 'Восстанавливает 40 HP союзнику на дистанции до 3 гексов',
         type: 'active',
+        effect: {
+          target: 'ally',
+          heal: 40,
+          range: 3,
+        },
       },
       ultimate: {
         id: 'divine_intervention',
@@ -530,6 +776,11 @@ export const heroes: Hero[] = [
         description: 'Воскрешает павшего союзника с 50% HP',
         type: 'ultimate',
         energyCost: 100,
+        effect: {
+          target: 'ally',
+          special: 'resurrect',
+          healPercent: 50,
+        },
       },
     },
     description: 'Благословенная служительница Света. Её молитвы исцеляют раны и возвращают павших.',
@@ -560,12 +811,22 @@ export const heroes: Hero[] = [
         name: 'Боевой Ритм',
         description: 'Союзники получают +1 к инициативе',
         type: 'passive',
+        passiveEffect: {
+          trigger: 'aura',
+          target: 'allies',
+          statBuffs: [{ stat: 'initiative', value: 1 }],
+        },
       },
       active: {
         id: 'war_cry',
         name: 'Боевой Клич',
         description: 'Союзники в радиусе 3 гексов получают +20% к атаке на 2 хода',
         type: 'active',
+        effect: {
+          target: 'ally',
+          area: 3,
+          statBuffs: [{ stat: 'attack', value: 20, isPercent: true, duration: 2 }],
+        },
       },
       ultimate: {
         id: 'drums_of_war',
@@ -573,6 +834,10 @@ export const heroes: Hero[] = [
         description: 'Все союзники получают дополнительный ход',
         type: 'ultimate',
         energyCost: 85,
+        effect: {
+          target: 'all_allies',
+          special: 'extra_turn',
+        },
       },
     },
     description: 'Ветеран сотен битв. Его барабаны вселяют храбрость в сердца союзников.',
@@ -603,12 +868,23 @@ export const heroes: Hero[] = [
         name: 'Похищение Жизни',
         description: 'Восстанавливает HP равное 20% нанесённого урона',
         type: 'passive',
+        passiveEffect: {
+          trigger: 'on_attack',
+          target: 'self',
+          special: 'life_drain',
+        },
       },
       active: {
         id: 'dark_pact',
         name: 'Тёмный Договор',
         description: 'Жертвует 20 своего HP, чтобы дать союзнику +30% урона на 2 хода',
         type: 'active',
+        effect: {
+          target: 'ally',
+          range: 4,
+          selfDamage: 20,
+          statBuffs: [{ stat: 'attack', value: 30, isPercent: true, duration: 2 }],
+        },
       },
       ultimate: {
         id: 'army_of_dead',
@@ -616,6 +892,10 @@ export const heroes: Hero[] = [
         description: 'Призывает 2 скелетов-воинов (50 HP, 20 атаки) на 3 хода',
         type: 'ultimate',
         energyCost: 100,
+        effect: {
+          target: 'self',
+          special: 'summon_skeletons',
+        },
       },
     },
     description: 'Мрачный маг, управляющий силами смерти. Грань между союзником и врагом для него размыта.',
@@ -646,19 +926,41 @@ export const heroes: Hero[] = [
         name: 'Статический Заряд',
         description: 'Атаки с шансом 25% наносят цепную молнию 2 ближайшим врагам',
         type: 'passive',
+        passiveEffect: {
+          trigger: 'on_attack',
+          target: 'enemies',
+          chance: 0.25,
+          damage: 15,
+          damageType: 'magical',
+          special: 'chain_lightning',
+        },
       },
       active: {
         id: 'totem_of_protection',
         name: 'Тотем Защиты',
-        description: 'Устанавливает тотем, дающий союзникам в радиусе 2 +15% защиты',
+        description: 'Устанавливает тотем, дающий союзникам в радиусе 2 +2 защиты на 3 хода',
         type: 'active',
+        effect: {
+          target: 'ally',
+          area: 2,
+          statBuffs: [
+            { stat: 'physicalDefense', value: 2, duration: 3 },
+            { stat: 'magicalDefense', value: 2, duration: 3 },
+          ],
+        },
       },
       ultimate: {
         id: 'storm_call',
         name: 'Зов Бури',
-        description: 'Вызывает грозу: молнии бьют случайных врагов 5 раз по 25 урона',
+        description: 'Вызывает грозу: молнии бьют 5 раз случайных врагов по 25 урона',
         type: 'ultimate',
         energyCost: 90,
+        effect: {
+          target: 'all_enemies',
+          damage: 25,
+          damageType: 'magical',
+          special: 'random_5_hits',
+        },
       },
     },
     description: 'Духовный лидер племени, способный призывать гнев небес на врагов.',
@@ -678,7 +980,7 @@ export const getHeroesByRange = (range: AttackRange): Hero[] => {
 };
 
 export const calculateDamageReduction = (defense: number): number => {
-  return Math.min(defense * 10, 90); // Cap at 90%
+  return Math.min(defense * 10, 90);
 };
 
 export const calculateDamage = (

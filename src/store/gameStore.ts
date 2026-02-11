@@ -1,9 +1,17 @@
 import { create } from 'zustand';
-import { Hero, heroes, calculateDamage, HeroTrait, HeroReaction, StatusEffect } from '@/data/heroes';
+import { Hero, heroes, calculateDamage, HeroTrait, HeroReaction, StatusEffect, StatusEffectType, SkillEffect, Skill } from '@/data/heroes';
 
 export type GamePhase = 'menu' | 'heroes' | 'draft' | 'placement' | 'battle';
 export type Player = 'player' | 'enemy';
 export type SkillMode = null | 'active' | 'ultimate';
+
+export interface TemporaryBuff {
+  stat: 'attack' | 'speed' | 'physicalDefense' | 'magicalDefense' | 'initiative';
+  value: number;
+  isPercent?: boolean;
+  duration: number;
+  sourceSkillId?: string;
+}
 
 export interface BattleUnit extends Hero {
   owner: Player;
@@ -18,11 +26,19 @@ export interface BattleUnit extends Hero {
   hasWaited?: boolean;
   buffs?: { type: string; duration: number; value?: number }[];
   statusEffects: StatusEffect[];
+  temporaryBuffs: TemporaryBuff[];
+  skillCooldowns: Record<string, number>;
+  /** Flag for guaranteed crit on next attack */
+  guaranteedCrit?: boolean;
+  /** Flag to ignore range penalty on next attack */
+  ignoreRangePenalty?: boolean;
+  /** Counter for passives like divine shield */
+  hitCounter?: number;
 }
 
 export interface SkillResult {
-  type: 'damage' | 'heal' | 'buff' | 'area';
-  targets: { unit: BattleUnit; value: number }[];
+  type: 'damage' | 'heal' | 'buff' | 'area' | 'status';
+  targets: { unit: BattleUnit; value: number; statusApplied?: StatusEffectType }[];
   message: string;
 }
 
@@ -45,7 +61,6 @@ interface GameState {
   selectedUnit: BattleUnit | null;
   hoveredUnit: BattleUnit | null;
   
-  // Skill mode
   skillMode: SkillMode;
   setSkillMode: (mode: SkillMode) => void;
   skillRange: Set<string>;
@@ -60,7 +75,6 @@ interface GameState {
   useSkill: (caster: BattleUnit, targetPos: { q: number; r: number }, skillType: 'active' | 'ultimate') => SkillResult | null;
   endTurn: () => void;
   
-  // New actions
   waitAction: (unit: BattleUnit) => void;
   defendAction: (unit: BattleUnit) => void;
   
@@ -89,7 +103,6 @@ export const hexDistance = (a: { q: number; r: number }, b: { q: number; r: numb
   );
 };
 
-// Get hex neighbors (odd-r layout)
 const getHexNeighbors = (q: number, r: number): { q: number; r: number }[] => {
   const isOddRow = r % 2 === 1;
   if (isOddRow) {
@@ -111,6 +124,183 @@ const getHexNeighbors = (q: number, r: number): { q: number; r: number }[] => {
     { q: q - 1, r: r },
   ];
 };
+
+// ===== UNIVERSAL SKILL EFFECT SYSTEM =====
+
+/** Get effective stat value including temporary buffs */
+export const getEffectiveStat = (unit: BattleUnit, stat: 'attack' | 'speed' | 'physicalDefense' | 'magicalDefense' | 'initiative'): number => {
+  let base = unit[stat] as number;
+  let percentBonus = 0;
+  let flatBonus = 0;
+  
+  for (const buff of unit.temporaryBuffs) {
+    if (buff.stat === stat) {
+      if (buff.isPercent) {
+        percentBonus += buff.value;
+      } else {
+        flatBonus += buff.value;
+      }
+    }
+  }
+  
+  return Math.max(0, Math.floor(base * (1 + percentBonus / 100) + flatBonus));
+};
+
+/** Apply a status effect to a unit */
+const applyStatusToUnit = (unit: BattleUnit, statusType: StatusEffectType, duration: number, stacks?: number, sourceId?: string): BattleUnit => {
+  const existingIdx = unit.statusEffects.findIndex(s => s.type === statusType);
+  let newEffects = [...unit.statusEffects];
+  
+  if (statusType === 'acid') {
+    // Acid stacks up to 3
+    if (existingIdx >= 0) {
+      const existing = newEffects[existingIdx];
+      newEffects[existingIdx] = {
+        ...existing,
+        stacks: Math.min(3, (existing.stacks || 1) + (stacks || 1)),
+        duration: duration,
+      };
+    } else {
+      newEffects.push({ type: statusType, duration, stacks: stacks || 1, sourceId, turnsActive: 0 });
+    }
+  } else if (statusType === 'burning') {
+    // Burning refreshes duration
+    if (existingIdx >= 0) {
+      newEffects[existingIdx] = { ...newEffects[existingIdx], duration };
+    } else {
+      newEffects.push({ type: statusType, duration, sourceId, turnsActive: 0 });
+    }
+  } else if (statusType === 'bleeding') {
+    // Bleeding extends duration
+    if (existingIdx >= 0) {
+      newEffects[existingIdx] = { ...newEffects[existingIdx], duration: newEffects[existingIdx].duration + duration };
+    } else {
+      newEffects.push({ type: statusType, duration, sourceId, turnsActive: 0 });
+    }
+  } else {
+    // Default: replace if exists, otherwise add
+    if (existingIdx >= 0) {
+      newEffects[existingIdx] = { type: statusType, duration, stacks, sourceId, turnsActive: 0 };
+    } else {
+      newEffects.push({ type: statusType, duration, stacks, sourceId, turnsActive: 0 });
+    }
+  }
+  
+  return { ...unit, statusEffects: newEffects };
+};
+
+/** Process status effects at start of a unit's turn. Returns updated unit and damage taken. */
+const processStatusEffectsTick = (unit: BattleUnit): { unit: BattleUnit; tickDamage: number; skipTurn: boolean; messages: string[] } => {
+  let updatedUnit = { ...unit };
+  let tickDamage = 0;
+  let skipTurn = false;
+  const messages: string[] = [];
+  let newEffects = [...updatedUnit.statusEffects];
+  
+  for (let i = newEffects.length - 1; i >= 0; i--) {
+    const effect = newEffects[i];
+    
+    switch (effect.type) {
+      case 'acid': {
+        const acidDmg = 10 * (effect.stacks || 1);
+        tickDamage += acidDmg;
+        // Reduce physical defense by 1 per stack
+        updatedUnit = { ...updatedUnit, physicalDefense: Math.max(0, updatedUnit.physicalDefense - (effect.stacks || 1)) };
+        messages.push(`🧪 ${unit.avatar} получает ${acidDmg} урона от кислоты, физ. защита -${effect.stacks || 1}`);
+        break;
+      }
+      case 'burning': {
+        tickDamage += 15;
+        messages.push(`🔥 ${unit.avatar} получает 15 урона от горения`);
+        break;
+      }
+      case 'bleeding': {
+        const turnsActive = (effect.turnsActive || 0) + 1;
+        const bleedPercent = turnsActive === 1 ? 0.09 : turnsActive === 2 ? 0.12 : 0.15;
+        const bleedDmg = Math.floor(unit.maxHealth * bleedPercent);
+        tickDamage += bleedDmg;
+        newEffects[i] = { ...effect, turnsActive };
+        messages.push(`🩸 ${unit.avatar} теряет ${bleedDmg} HP от кровотечения (${Math.floor(bleedPercent * 100)}%)`);
+        break;
+      }
+      case 'frozen':
+        skipTurn = true;
+        messages.push(`🧊 ${unit.avatar} заморожен — пропускает ход`);
+        break;
+      case 'stunned':
+        skipTurn = true;
+        messages.push(`⚡ ${unit.avatar} оглушён — пропускает ход`);
+        break;
+      case 'sleep':
+        skipTurn = true;
+        messages.push(`💤 ${unit.avatar} спит — пропускает ход`);
+        break;
+      case 'fear':
+        skipTurn = true;
+        messages.push(`😱 ${unit.avatar} в страхе — пропускает ход`);
+        break;
+      case 'taunt':
+        // Handled in AI/movement logic
+        break;
+      case 'immobilized':
+      case 'silenced':
+      case 'suppressed':
+      case 'distracted':
+      case 'powerless':
+      case 'ranged_blocked':
+        // These are checked during actions, not on tick
+        break;
+    }
+    
+    // Decrease duration
+    newEffects[i] = { ...newEffects[i], duration: newEffects[i].duration - 1 };
+  }
+  
+  // Remove expired effects
+  newEffects = newEffects.filter(e => e.duration > 0);
+  
+  updatedUnit = { ...updatedUnit, statusEffects: newEffects };
+  
+  // Apply tick damage
+  if (tickDamage > 0) {
+    updatedUnit.currentHealth = Math.max(0, updatedUnit.currentHealth - tickDamage);
+    if (updatedUnit.currentHealth === 0) {
+      updatedUnit.isDead = true;
+    }
+  }
+  
+  return { unit: updatedUnit, tickDamage, skipTurn, messages };
+};
+
+/** Tick temporary buffs — decrease duration, remove expired */
+const tickTemporaryBuffs = (unit: BattleUnit): BattleUnit => {
+  const newBuffs = unit.temporaryBuffs
+    .map(b => ({ ...b, duration: b.duration - 1 }))
+    .filter(b => b.duration > 0);
+  return { ...unit, temporaryBuffs: newBuffs };
+};
+
+/** Tick skill cooldowns */
+const tickSkillCooldowns = (unit: BattleUnit): BattleUnit => {
+  const newCooldowns: Record<string, number> = {};
+  for (const [key, val] of Object.entries(unit.skillCooldowns)) {
+    if (val > 1) newCooldowns[key] = val - 1;
+  }
+  return { ...unit, skillCooldowns: newCooldowns };
+};
+
+/** Check if unit has a status effect */
+export const hasStatus = (unit: BattleUnit, status: StatusEffectType): boolean => {
+  return unit.statusEffects.some(e => e.type === status);
+};
+
+/** Check if unit has any crowd control effect */
+export const hasAnyCrowdControl = (unit: BattleUnit): boolean => {
+  const ccTypes: StatusEffectType[] = ['frozen', 'stunned', 'sleep', 'fear', 'immobilized'];
+  return unit.statusEffects.some(e => ccTypes.includes(e.type));
+};
+
+// ===== STORE =====
 
 export const useGameStore = create<GameState>((set, get) => ({
   phase: 'menu',
@@ -174,7 +364,6 @@ export const useGameStore = create<GameState>((set, get) => ({
   hoveredUnit: null,
   battleLog: [],
   
-  // Skill mode
   skillMode: null,
   setSkillMode: (mode) => set({ skillMode: mode }),
   skillRange: new Set<string>(),
@@ -187,10 +376,10 @@ export const useGameStore = create<GameState>((set, get) => ({
   initializeBattle: () => {
     const state = get();
     
-    const playerUnits: BattleUnit[] = state.playerDraft.map((hero, index) => ({
+    const createBattleUnit = (hero: Hero, owner: Player, position: { q: number; r: number }): BattleUnit => ({
       ...hero,
-      owner: 'player' as Player,
-      position: { q: 0, r: 1 + index * 2 },
+      owner,
+      position,
       currentHealth: hero.health,
       currentEnergy: 0,
       hasMoved: false,
@@ -199,21 +388,18 @@ export const useGameStore = create<GameState>((set, get) => ({
       reactionAvailable: hero.reaction !== 'none',
       rangedBlocked: false,
       statusEffects: [],
-    }));
+      temporaryBuffs: [],
+      skillCooldowns: {},
+      hitCounter: 0,
+    });
     
-    const enemyUnits: BattleUnit[] = state.enemyDraft.map((hero, index) => ({
-      ...hero,
-      owner: 'enemy' as Player,
-      position: { q: 11, r: 1 + index * 2 },
-      currentHealth: hero.health,
-      currentEnergy: 0,
-      hasMoved: false,
-      hasActed: false,
-      isDead: false,
-      reactionAvailable: hero.reaction !== 'none',
-      rangedBlocked: false,
-      statusEffects: [],
-    }));
+    const playerUnits: BattleUnit[] = state.playerDraft.map((hero, index) =>
+      createBattleUnit(hero, 'player', { q: 0, r: 1 + index * 2 })
+    );
+    
+    const enemyUnits: BattleUnit[] = state.enemyDraft.map((hero, index) =>
+      createBattleUnit(hero, 'enemy', { q: 11, r: 1 + index * 2 })
+    );
     
     const allUnits = [...playerUnits, ...enemyUnits];
     const turnOrder = [...allUnits].sort((a, b) => b.initiative - a.initiative);
@@ -234,7 +420,6 @@ export const useGameStore = create<GameState>((set, get) => ({
   moveUnit: (unit, position) => {
     let provokedResult: { attackerId: string; damage: number; attackerPos: { q: number; r: number }; targetPos: { q: number; r: number } } | undefined;
     
-    // Check for provoked attacks (Спровоцированная атака) before moving
     if (unit.position) {
       const preState = get();
       const enemies = unit.owner === 'player' ? preState.enemyUnits : preState.playerUnits;
@@ -284,7 +469,6 @@ export const useGameStore = create<GameState>((set, get) => ({
       }
     }
     
-    // Perform the actual move
     const state = get();
     const updateUnits = (units: BattleUnit[]) =>
       units.map(u => u.id === unit.id ? { ...u, position, hasMoved: true } : u);
@@ -323,7 +507,6 @@ export const useGameStore = create<GameState>((set, get) => ({
       return { damage: 0, isCrit: false };
     }
     
-    // Determine attack mode and penalties
     let forcedMelee = false;
     let hasDamagePenalty = false;
     if (attacker.attackRange === 'ranged') {
@@ -334,23 +517,31 @@ export const useGameStore = create<GameState>((set, get) => ({
         } else {
           return { damage: 0, isCrit: false };
         }
-      } else if (distance > attacker.range) {
+      } else if (distance > attacker.range && !attacker.ignoreRangePenalty) {
         hasDamagePenalty = true;
       }
     }
     
     const isMeleeAttack = attacker.attackRange === 'melee' || forcedMelee;
     
-    // Calculate effective defense including buffs
     let effectivePhysDef = target.physicalDefense;
     let effectiveMagDef = target.magicalDefense;
+    // Apply temporary defense buffs
+    for (const buff of target.temporaryBuffs) {
+      if (buff.stat === 'physicalDefense') {
+        effectivePhysDef += buff.isPercent ? Math.floor(target.physicalDefense * buff.value / 100) : buff.value;
+      }
+      if (buff.stat === 'magicalDefense') {
+        effectiveMagDef += buff.isPercent ? Math.floor(target.magicalDefense * buff.value / 100) : buff.value;
+      }
+    }
     if (target.buffs?.some(b => b.type === 'defense_boost')) { effectivePhysDef += 1; effectiveMagDef += 1; }
     if (target.buffs?.some(b => b.type === 'parry_phys')) effectivePhysDef += 2;
     if (target.buffs?.some(b => b.type === 'parry_mag')) effectiveMagDef += 2;
     
     // Check PARRY reaction BEFORE damage calculation
     let parryTriggered = false;
-    if (!target.isDead && target.reactionAvailable && target.reaction === 'parry' && attacker.trait !== 'ignores_reactions') {
+    if (!target.isDead && target.reactionAvailable && target.reaction === 'parry' && attacker.trait !== 'ignores_reactions' && !hasStatus(target, 'distracted')) {
       if (Math.random() < 0.5) {
         parryTriggered = true;
         if (attacker.attackType === 'physical') effectivePhysDef += 2;
@@ -358,24 +549,53 @@ export const useGameStore = create<GameState>((set, get) => ({
       }
     }
     
-    let damage = calculateDamage(attacker.attack, attacker.attackType, effectivePhysDef, effectiveMagDef);
+    // Use effective attack stat (includes temp buffs)
+    const effectiveAttack = getEffectiveStat(attacker, 'attack');
+    let damage = calculateDamage(effectiveAttack, attacker.attackType, effectivePhysDef, effectiveMagDef);
     
-    // Apply ranged penalties after base damage calc
+    // Ranged penalties
     if (attacker.attackRange === 'ranged' && forcedMelee && attacker.trait !== 'no_melee_penalty') {
       damage = Math.floor(damage / 3);
     } else if (attacker.attackRange === 'ranged' && !forcedMelee && hasDamagePenalty) {
       damage = Math.floor(damage / 2);
     }
     
-    const isCrit = Math.random() < 0.15;
+    // Sleep bonus damage
+    if (hasStatus(target, 'sleep')) {
+      damage = Math.floor(damage * 1.15);
+      // Wake up
+      const newEffects = target.statusEffects.filter(e => e.type !== 'sleep');
+      const updateUnit = (units: BattleUnit[], unitId: string, updates: Partial<BattleUnit>) =>
+        units.map(u => u.id === unitId ? { ...u, ...updates } : u);
+      set(s => ({
+        playerUnits: updateUnit(s.playerUnits, target.id, { statusEffects: newEffects }),
+        enemyUnits: updateUnit(s.enemyUnits, target.id, { statusEffects: newEffects }),
+        turnOrder: updateUnit(s.turnOrder, target.id, { statusEffects: newEffects }),
+      }));
+      get().addBattleLog(`💤 ${target.avatar} разбужен! (+15% урона)`);
+    }
+    
+    // Crit check
+    const isCrit = attacker.guaranteedCrit || Math.random() < 0.15;
     if (isCrit) {
       damage = Math.floor(damage * 1.5);
+    }
+    
+    // Clear guaranteed crit flag after use
+    if (attacker.guaranteedCrit) {
+      const clearCrit = (units: BattleUnit[]) =>
+        units.map(u => u.id === attacker.id ? { ...u, guaranteedCrit: false, ignoreRangePenalty: false } : u);
+      set(s => ({
+        playerUnits: clearCrit(s.playerUnits),
+        enemyUnits: clearCrit(s.enemyUnits),
+        turnOrder: clearCrit(s.turnOrder),
+      }));
     }
     
     const newHealth = Math.max(0, target.currentHealth - damage);
     const isDead = newHealth === 0;
     
-    // Energy economy based on attack type and penalties
+    // Energy economy
     let attackerEnergyGain: number;
     let targetEnergyGain: number;
     if (hasDamagePenalty) {
@@ -385,7 +605,6 @@ export const useGameStore = create<GameState>((set, get) => ({
       attackerEnergyGain = 15;
       targetEnergyGain = 20;
     } else {
-      // Ranged, no penalty
       attackerEnergyGain = 10;
       targetEnergyGain = 15;
     }
@@ -396,7 +615,6 @@ export const useGameStore = create<GameState>((set, get) => ({
     const updateUnit = (units: BattleUnit[], unitId: string, updates: Partial<BattleUnit>) =>
       units.map(u => u.id === unitId ? { ...u, ...updates } : u);
     
-    const isRangedNonMelee = attacker.attackRange === 'ranged' && !forcedMelee;
     const attackerUpdates: Partial<BattleUnit> = { 
       hasActed: true, 
       currentEnergy: attackerEnergy,
@@ -411,7 +629,7 @@ export const useGameStore = create<GameState>((set, get) => ({
     
     let reactionResult: { type: string; reactorId: string; damage?: number; isMelee?: boolean; reactorPos?: { q: number; r: number }; targetPos?: { q: number; r: number } } | undefined;
     
-    // Handle parry result (already triggered before damage)
+    // Handle parry result
     if (parryTriggered) {
       const parryBuff = { 
         type: attacker.attackType === 'physical' ? 'parry_phys' : 'parry_mag', 
@@ -423,18 +641,24 @@ export const useGameStore = create<GameState>((set, get) => ({
       const defLabel = attacker.attackType === 'physical' ? 'физ.' : 'маг.';
       get().addBattleLog(`🤺 ${target.avatar} парирование! +2 ${defLabel} защиты`);
       reactionResult = { type: 'parry', reactorId: target.id, reactorPos: target.position ? { ...target.position } : undefined };
+      
+      // Knight passive: on parry +1 initiative
+      if (target.skills.passive.passiveEffect?.special === 'on_parry_initiative') {
+        const initBuff: TemporaryBuff = { stat: 'initiative', value: 1, duration: 1 };
+        targetUpdates.temporaryBuffs = [...(target.temporaryBuffs || []), initBuff];
+        get().addBattleLog(`🛡️ ${target.avatar} +1 инициатива от парирования`);
+      }
     }
     
-    // Process post-damage reactions (counter, return, retreat - NOT parry)
-    if (!isDead && !parryTriggered && target.reactionAvailable && target.reaction !== 'none' && target.reaction !== 'parry' && attacker.trait !== 'ignores_reactions') {
+    // Post-damage reactions (counter, return, retreat)
+    if (!isDead && !parryTriggered && target.reactionAvailable && target.reaction !== 'none' && target.reaction !== 'parry' && attacker.trait !== 'ignores_reactions' && !hasStatus(target, 'distracted')) {
       const reactionType = target.reaction;
       
       switch (reactionType) {
         case 'counterattack': {
-          // Only triggers on melee attacks
           if (isMeleeAttack && target.position && attacker.position && hexDistance(target.position, attacker.position) === 1) {
             const counterDamage = calculateDamage(
-              target.attack,
+              getEffectiveStat(target, 'attack'),
               target.attackType,
               attacker.physicalDefense,
               attacker.magicalDefense
@@ -458,10 +682,9 @@ export const useGameStore = create<GameState>((set, get) => ({
           break;
         }
         case 'return_shot': {
-          // Only triggers on ranged attacks
           if (!isMeleeAttack && target.attackRange === 'ranged' && target.position && attacker.position) {
             const shotDamage = calculateDamage(
-              target.attack,
+              getEffectiveStat(target, 'attack'),
               target.attackType,
               attacker.physicalDefense,
               attacker.magicalDefense
@@ -485,13 +708,10 @@ export const useGameStore = create<GameState>((set, get) => ({
           break;
         }
         case 'retreat': {
-          // Only triggers on melee attacks
           if (isMeleeAttack && target.position && attacker.position) {
-            // Find hex opposite to attacker
             const dq = target.position.q - attacker.position.q;
             const dr = target.position.r - attacker.position.r;
             
-            // Try direct retreat first
             const retreatQ = target.position.q + Math.sign(dq);
             const retreatR = target.position.r + Math.sign(dr);
             
@@ -505,7 +725,6 @@ export const useGameStore = create<GameState>((set, get) => ({
             if (!isOccupied(retreatQ, retreatR)) {
               retreatPos = { q: retreatQ, r: retreatR };
             } else {
-              // Try neighbors of retreat position
               const neighbors = getHexNeighbors(target.position.q, target.position.r);
               for (const n of neighbors) {
                 if (!isOccupied(n.q, n.r) && hexDistance(n, attacker.position) > 1) {
@@ -525,7 +744,23 @@ export const useGameStore = create<GameState>((set, get) => ({
           }
           break;
         }
-        // Parry is handled before damage calculation (above)
+      }
+    }
+    
+    // Apply passive on-attack effects (burning from fire mage, frostbite, etc.)
+    if (!isDead && attacker.skills.passive.passiveEffect?.trigger === 'on_attack') {
+      const passive = attacker.skills.passive.passiveEffect;
+      
+      if (passive.status && !hasStatus(attacker, 'suppressed')) {
+        const updatedTarget = applyStatusToUnit(
+          { ...target, ...targetUpdates } as BattleUnit,
+          passive.status,
+          passive.statusDuration || 2,
+          undefined,
+          attacker.id
+        );
+        targetUpdates.statusEffects = updatedTarget.statusEffects;
+        get().addBattleLog(`${attacker.avatar} накладывает ${passive.status === 'burning' ? '🔥 горение' : '❄️ замедление'} на ${target.avatar}`);
       }
     }
     
@@ -551,7 +786,7 @@ export const useGameStore = create<GameState>((set, get) => ({
     if (attacker.attackRange === 'ranged') {
       if (forcedMelee) {
         distanceText = attacker.trait === 'no_melee_penalty' ? '' : ' (ближний бой -66%)';
-      } else if (distance > attacker.range) {
+      } else if (distance > attacker.range && !attacker.ignoreRangePenalty) {
         distanceText = ' (дальность -50%)';
       }
     }
@@ -587,16 +822,20 @@ export const useGameStore = create<GameState>((set, get) => ({
         });
       }
       
-      // Restore reaction charge at start of this unit's next turn
+      // Restore reaction charge
       if (currentUnit.reaction !== 'none' && !currentUnit.reactionAvailable) {
-        const restoreReaction = (units: BattleUnit[]) =>
-          units.map(u => u.id === currentUnit.id ? { ...u, reactionAvailable: true } : u);
-        
-        set(s => ({
-          playerUnits: restoreReaction(s.playerUnits),
-          enemyUnits: restoreReaction(s.enemyUnits),
-          turnOrder: restoreReaction(s.turnOrder),
-        }));
+        // Check if stunned — reaction unavailable for 1 turn after stun
+        const wasStunned = currentUnit.statusEffects.some(e => e.type === 'stunned' && e.duration <= 1);
+        if (!wasStunned) {
+          const restoreReaction = (units: BattleUnit[]) =>
+            units.map(u => u.id === currentUnit.id ? { ...u, reactionAvailable: true } : u);
+          
+          set(s => ({
+            playerUnits: restoreReaction(s.playerUnits),
+            enemyUnits: restoreReaction(s.enemyUnits),
+            turnOrder: restoreReaction(s.turnOrder),
+          }));
+        }
       }
     }
     
@@ -608,10 +847,9 @@ export const useGameStore = create<GameState>((set, get) => ({
     } while (state.turnOrder[nextIndex]?.isDead && attempts < state.turnOrder.length);
     
     if (nextIndex <= state.currentUnitIndex || attempts >= state.turnOrder.length) {
-      // New round - reset units and restore original initiative order
+      // New round
       const allAliveUnits = [...state.playerUnits, ...state.enemyUnits].filter(u => !u.isDead);
       
-      // Check for ranged units starting adjacent to enemies
       const checkRangedBlocked = (unit: BattleUnit, enemies: BattleUnit[]): boolean => {
         if (unit.attackRange !== 'ranged' || !unit.position) return false;
         return enemies.some(e => e.position && !e.isDead && hexDistance(unit.position!, e.position) === 1);
@@ -629,9 +867,12 @@ export const useGameStore = create<GameState>((set, get) => ({
       const newPlayerUnits = resetUnits(state.playerUnits, state.enemyUnits);
       const newEnemyUnits = resetUnits(state.enemyUnits, state.playerUnits);
       
-      // Restore original initiative order for new round
       const allUnitsForOrder = [...newPlayerUnits, ...newEnemyUnits];
-      const newTurnOrder = [...allUnitsForOrder].sort((a, b) => b.initiative - a.initiative);
+      const newTurnOrder = [...allUnitsForOrder].sort((a, b) => {
+        const aInit = getEffectiveStat(a, 'initiative');
+        const bInit = getEffectiveStat(b, 'initiative');
+        return bInit - aInit;
+      });
       
       set({
         playerUnits: newPlayerUnits,
@@ -639,7 +880,6 @@ export const useGameStore = create<GameState>((set, get) => ({
         turnOrder: newTurnOrder,
       });
       
-      // Find first alive unit in new order
       nextIndex = 0;
       while (newTurnOrder[nextIndex]?.isDead && nextIndex < newTurnOrder.length) {
         nextIndex++;
@@ -647,7 +887,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       
       get().addBattleLog('🔄 Новый раунд!');
     } else {
-      // Check rangedBlocked for next unit at start of their turn
+      // Check rangedBlocked for next unit
       const nextUnit = state.turnOrder[nextIndex];
       if (nextUnit && nextUnit.attackRange === 'ranged' && nextUnit.position) {
         const enemies = nextUnit.owner === 'player' ? state.enemyUnits : state.playerUnits;
@@ -664,6 +904,47 @@ export const useGameStore = create<GameState>((set, get) => ({
       }
     }
     
+    // Process start-of-turn effects for the next unit
+    const updatedState = get();
+    const nextUnit = updatedState.turnOrder[nextIndex];
+    if (nextUnit && !nextUnit.isDead) {
+      // Tick temporary buffs and cooldowns
+      let processed = tickTemporaryBuffs(nextUnit);
+      processed = tickSkillCooldowns(processed);
+      
+      // Process status effect ticks (damage, skip turn, etc.)
+      const { unit: tickedUnit, tickDamage, skipTurn, messages } = processStatusEffectsTick(processed);
+      
+      // Process healing auras
+      const allies = tickedUnit.owner === 'player' ? updatedState.playerUnits : updatedState.enemyUnits;
+      for (const ally of allies) {
+        if (ally.isDead || !ally.position || !tickedUnit.position) continue;
+        const passive = ally.skills.passive.passiveEffect;
+        if (!passive || passive.trigger !== 'aura' || !passive.heal) continue;
+        if (hasStatus(ally, 'suppressed')) continue;
+        const dist = hexDistance(tickedUnit.position, ally.position);
+        if (passive.area && dist <= passive.area) {
+          const healAmount = passive.heal;
+          if (tickedUnit.currentHealth < tickedUnit.maxHealth) {
+            const newHp = Math.min(tickedUnit.maxHealth, tickedUnit.currentHealth + healAmount);
+            tickedUnit.currentHealth = newHp;
+            get().addBattleLog(`✨ ${tickedUnit.avatar} восстанавливает ${healAmount} HP от ауры ${ally.avatar}`);
+          }
+        }
+      }
+      
+      messages.forEach(m => get().addBattleLog(m));
+      
+      const updateAll = (units: BattleUnit[]) =>
+        units.map(u => u.id === nextUnit.id ? { ...tickedUnit } : u);
+      
+      set(s => ({
+        playerUnits: updateAll(s.playerUnits),
+        enemyUnits: updateAll(s.enemyUnits),
+        turnOrder: updateAll(s.turnOrder),
+      }));
+    }
+    
     set({
       currentUnitIndex: nextIndex,
       selectedUnit: null,
@@ -672,11 +953,10 @@ export const useGameStore = create<GameState>((set, get) => ({
     });
   },
   
-  // Wait action - only works once per round
   waitAction: (unit) => {
     const state = get();
     
-    if (unit.hasWaited) return; // Already waited this round
+    if (unit.hasWaited) return;
     
     const aliveUnits = state.turnOrder.filter(u => !u.isDead);
     const currentPosInAlive = aliveUnits.findIndex(u => u.id === unit.id);
@@ -693,7 +973,6 @@ export const useGameStore = create<GameState>((set, get) => ({
     const deadUnits = state.turnOrder.filter(u => u.isDead);
     const finalTurnOrder = [...newAliveOrder, ...deadUnits];
     
-    // Also update the hasWaited flag in unit arrays
     const updateWaited = (units: BattleUnit[]) =>
       units.map(u => u.id === unit.id ? { ...u, hasWaited: true } : u);
     
@@ -707,11 +986,10 @@ export const useGameStore = create<GameState>((set, get) => ({
     get().endTurn();
   },
   
-  // Defend action - requires both movement and action points
   defendAction: (unit) => {
     const state = get();
     
-    if (unit.hasMoved || unit.hasActed) return; // Needs both points
+    if (unit.hasMoved || unit.hasActed) return;
     
     const newEnergy = Math.min(unit.maxEnergy, unit.currentEnergy + 10);
     const newBuffs = [...(unit.buffs || []), { type: 'defense_boost', duration: 1, value: 1 }];
@@ -755,217 +1033,332 @@ export const useGameStore = create<GameState>((set, get) => ({
     });
   },
   
+  // ===== UNIVERSAL SKILL SYSTEM =====
   useSkill: (caster, targetPos, skillType) => {
     const state = get();
     const skill = skillType === 'active' ? caster.skills.active : caster.skills.ultimate;
-    const allUnits = [...state.playerUnits, ...state.enemyUnits];
+    const effect = skill.effect;
     
-    const target = allUnits.find(u => 
-      u.position?.q === targetPos.q && u.position?.r === targetPos.r && !u.isDead
-    );
-    
-    let result: SkillResult | null = null;
-    const targets: { unit: BattleUnit; value: number }[] = [];
-    
+    // Energy check for ultimate
     if (skillType === 'ultimate' && caster.currentEnergy < (skill.energyCost || 100)) {
       return null;
     }
     
+    // Cooldown check for active skills
+    if (skillType === 'active' && caster.skillCooldowns[skill.id] > 0) {
+      return null;
+    }
+    
+    // Silence check
+    if (hasStatus(caster, 'silenced')) {
+      return null;
+    }
+    
+    // No effect defined — fallback to basic damage
+    if (!effect) {
+      const allUnits = [...state.playerUnits, ...state.enemyUnits];
+      const target = allUnits.find(u => 
+        u.position?.q === targetPos.q && u.position?.r === targetPos.r && !u.isDead
+      );
+      if (!target) return null;
+      
+      const damage = Math.floor(getEffectiveStat(caster, 'attack') * (skillType === 'ultimate' ? 1.5 : 1.0));
+      const targets = [{ unit: target, value: damage }];
+      const result: SkillResult = { type: 'damage', targets, message: `${caster.avatar} использует ${skill.name}!` };
+      
+      applySkillResults(get, set, caster, skill, skillType, result);
+      return result;
+    }
+    
+    const allUnits = [...state.playerUnits, ...state.enemyUnits];
     const enemies = caster.owner === 'player' ? state.enemyUnits : state.playerUnits;
     const allies = caster.owner === 'player' ? state.playerUnits : state.enemyUnits;
     
-    switch (caster.id) {
-      case 'knight':
-      case 'stone_giant':
-      case 'paladin':
-        if (skillType === 'active') {
-          // Knight: Maneuvers - buff speed of self or ally
-          if (caster.id === 'knight') {
-            const allyTarget = allies.find(a => 
-              a.position?.q === targetPos.q && a.position?.r === targetPos.r && !a.isDead
-            );
-            if (allyTarget) {
-              targets.push({ unit: allyTarget, value: 2 });
-              result = { type: 'buff', targets, message: `${caster.avatar} использует ${skill.name} на ${allyTarget.name}!` };
-            }
-          } else {
-            const areaTargets = enemies.filter(e => {
-              if (!e.position || !caster.position) return false;
-              return hexDistance(caster.position, e.position) <= 2 && !e.isDead;
-            });
-            areaTargets.forEach(t => {
-              const damage = Math.floor(caster.attack * 0.6);
-              targets.push({ unit: t, value: damage });
-            });
-            result = { type: 'area', targets, message: `${caster.avatar} использует ${skill.name}!` };
-          }
-        } else {
-          if (caster.id === 'knight' && target) {
-            // Shield Bash: 50 damage + stun
-            const damage = 50;
-            targets.push({ unit: target, value: damage });
-            result = { type: 'damage', targets, message: `${caster.avatar} наносит ${skill.name}!` };
-          } else {
-            targets.push({ unit: caster, value: 50 });
-            result = { type: 'buff', targets, message: `${caster.avatar} активирует ${skill.name}!` };
-          }
-        }
-        break;
-        
-      case 'shadow_blade':
-      case 'berserker':
-        if (skillType === 'active' && target) {
-          const damage = Math.floor(caster.attack * 1.2);
-          targets.push({ unit: target, value: damage });
-          result = { type: 'damage', targets, message: `${caster.avatar} наносит ${skill.name}!` };
-        } else if (skillType === 'ultimate') {
-          const nearbyEnemies = enemies.filter(e => {
-            if (!e.position || !caster.position) return false;
-            return hexDistance(caster.position, e.position) <= 1 && !e.isDead;
-          });
-          nearbyEnemies.forEach(e => {
-            targets.push({ unit: e, value: Math.floor(caster.attack * 0.8) });
-          });
-          result = { type: 'area', targets, message: `${caster.avatar} активирует ${skill.name}!` };
-        }
-        break;
-        
-      case 'fire_mage':
-      case 'frost_mage':
-        if (target && targetPos) {
-          const areaTargets = enemies.filter(e => {
-            if (!e.position) return false;
-            return hexDistance(targetPos, e.position) <= 2 && !e.isDead;
-          });
-          const baseDamage = skillType === 'ultimate' ? Math.floor(caster.attack * 1.5) : Math.floor(caster.attack * 0.8);
-          areaTargets.forEach(t => {
-            targets.push({ unit: t, value: baseDamage });
-          });
-          result = { type: 'area', targets, message: `${caster.avatar} выпускает ${skill.name}!` };
-        }
-        break;
-        
-      case 'elf_archer':
-        if (skillType === 'active' && target) {
-          // Entangle: immobilize for 1 turn
-          targets.push({ unit: target, value: 0 });
-          result = { type: 'buff', targets, message: `${caster.avatar} опутывает ${target.name}!` };
-        } else if (skillType === 'ultimate') {
-          // Precise Shot: self-buff (next shot guaranteed crit, no range penalty)
-          targets.push({ unit: caster, value: 0 });
-          result = { type: 'buff', targets, message: `${caster.avatar} активирует ${skill.name}!` };
-        }
-        break;
-        
-      case 'light_priestess':
-        if (skillType === 'active') {
-          const allyTarget = allies.find(a => 
-            a.position?.q === targetPos.q && a.position?.r === targetPos.r && !a.isDead
+    const targets: { unit: BattleUnit; value: number; statusApplied?: StatusEffectType }[] = [];
+    let resultType: SkillResult['type'] = 'damage';
+    let message = `${caster.avatar} использует ${skill.name}!`;
+    
+    // Determine target units based on effect.target
+    let targetUnits: BattleUnit[] = [];
+    
+    switch (effect.target) {
+      case 'enemy': {
+        if (effect.area) {
+          // Area effect centered on targetPos
+          targetUnits = enemies.filter(e => 
+            e.position && !e.isDead && hexDistance(targetPos, e.position) <= effect.area!
           );
-          if (allyTarget) {
-            targets.push({ unit: allyTarget, value: 40 });
-            result = { type: 'heal', targets, message: `${caster.avatar} исцеляет ${allyTarget.name}!` };
+        } else {
+          const target = allUnits.find(u => 
+            u.position?.q === targetPos.q && u.position?.r === targetPos.r && !u.isDead
+          );
+          if (target) targetUnits = [target];
+        }
+        break;
+      }
+      case 'ally': {
+        if (effect.area) {
+          targetUnits = allies.filter(a => 
+            a.position && !a.isDead && hexDistance(caster.position!, a.position) <= effect.area!
+          );
+          // Include self in ally area
+          if (!targetUnits.find(u => u.id === caster.id)) {
+            const self = allies.find(a => a.id === caster.id);
+            if (self && !self.isDead) targetUnits.push(self);
           }
         } else {
-          allies.filter(a => !a.isDead).forEach(a => {
-            targets.push({ unit: a, value: 30 });
-          });
-          result = { type: 'heal', targets, message: `${caster.avatar} активирует ${skill.name}!` };
+          // Single ally target (can also be self)
+          const target = [...allies].find(u => 
+            u.position?.q === targetPos.q && u.position?.r === targetPos.r && !u.isDead
+          );
+          if (target) targetUnits = [target];
         }
         break;
-        
-      case 'war_drummer':
-      case 'shaman':
-        if (skillType === 'active') {
-          const nearbyAllies = allies.filter(a => {
-            if (!a.position || !caster.position) return false;
-            return hexDistance(caster.position, a.position) <= 3 && !a.isDead;
-          });
-          nearbyAllies.forEach(a => {
-            targets.push({ unit: a, value: 20 });
-          });
-          result = { type: 'buff', targets, message: `${caster.avatar} вдохновляет союзников!` };
-        } else if (target) {
-          targets.push({ unit: target, value: Math.floor(caster.attack * 1.5) });
-          result = { type: 'damage', targets, message: `${caster.avatar} обрушивает ${skill.name}!` };
-        }
-        break;
-        
-      case 'necromancer':
-        if (target) {
-          const damage = skillType === 'ultimate' ? Math.floor(caster.attack * 1.8) : Math.floor(caster.attack * 1.0);
-          targets.push({ unit: target, value: damage });
-          result = { type: 'damage', targets, message: `${caster.avatar} использует ${skill.name}!` };
-        }
-        break;
-        
-      default:
-        if (target) {
-          const damage = Math.floor(caster.attack * (skillType === 'ultimate' ? 1.5 : 1.0));
-          targets.push({ unit: target, value: damage });
-          result = { type: 'damage', targets, message: `${caster.avatar} использует ${skill.name}!` };
-        }
-    }
-    
-    if (!result || targets.length === 0) return null;
-    
-    const updateUnit = (units: BattleUnit[], unitId: string, updates: Partial<BattleUnit>) =>
-      units.map(u => u.id === unitId ? { ...u, ...updates } : u);
-    
-    let casterEnergy = caster.currentEnergy;
-    if (skillType === 'ultimate') {
-      casterEnergy = Math.max(0, caster.currentEnergy - (skill.energyCost || 100));
-    } else {
-      casterEnergy = Math.min(caster.maxEnergy, caster.currentEnergy + 10);
-    }
-    
-    targets.forEach(({ unit, value }) => {
-      if (result!.type === 'damage' || result!.type === 'area') {
-        const newHealth = Math.max(0, unit.currentHealth - value);
-        const isDead = newHealth === 0;
-        const updates = { currentHealth: newHealth, isDead };
-        
-        if (unit.owner === 'player') {
-          set(s => ({ playerUnits: updateUnit(s.playerUnits, unit.id, updates) }));
-        } else {
-          set(s => ({ enemyUnits: updateUnit(s.enemyUnits, unit.id, updates) }));
-        }
-        set(s => ({ turnOrder: updateUnit(s.turnOrder, unit.id, updates) }));
-        
-        if (isDead) {
-          get().addBattleLog(`☠️ ${unit.name} повержен!`);
-        }
-      } else if (result!.type === 'heal') {
-        const newHealth = Math.min(unit.maxHealth, unit.currentHealth + value);
-        const updates = { currentHealth: newHealth };
-        
-        if (unit.owner === 'player') {
-          set(s => ({ playerUnits: updateUnit(s.playerUnits, unit.id, updates) }));
-        } else {
-          set(s => ({ enemyUnits: updateUnit(s.enemyUnits, unit.id, updates) }));
-        }
-        set(s => ({ turnOrder: updateUnit(s.turnOrder, unit.id, updates) }));
       }
-    });
-    
-    const casterUpdates = { hasActed: true, currentEnergy: casterEnergy };
-    if (caster.owner === 'player') {
-      set(s => ({ playerUnits: updateUnit(s.playerUnits, caster.id, casterUpdates) }));
-    } else {
-      set(s => ({ enemyUnits: updateUnit(s.enemyUnits, caster.id, casterUpdates) }));
+      case 'self': {
+        targetUnits = [caster];
+        break;
+      }
+      case 'all_enemies': {
+        targetUnits = enemies.filter(e => !e.isDead);
+        break;
+      }
+      case 'all_allies': {
+        targetUnits = allies.filter(a => !a.isDead);
+        break;
+      }
     }
-    set(s => ({ 
-      turnOrder: updateUnit(s.turnOrder, caster.id, casterUpdates),
-      selectedUnit: s.selectedUnit?.id === caster.id ? { ...s.selectedUnit, ...casterUpdates } : s.selectedUnit,
-      skillMode: null,
-      skillRange: new Set<string>(),
-    }));
     
-    get().addBattleLog(result.message);
+    if (targetUnits.length === 0 && effect.target !== 'self') return null;
     
+    // Handle special effects that need custom logic
+    if (effect.special === 'random_3_targets') {
+      const alive = enemies.filter(e => !e.isDead);
+      const shuffled = [...alive].sort(() => Math.random() - 0.5);
+      targetUnits = shuffled.slice(0, 3);
+    } else if (effect.special === 'random_5_hits') {
+      const alive = enemies.filter(e => !e.isDead);
+      targetUnits = [];
+      for (let i = 0; i < 5; i++) {
+        if (alive.length > 0) {
+          targetUnits.push(alive[Math.floor(Math.random() * alive.length)]);
+        }
+      }
+    } else if (effect.special === 'percent_lost_hp_damage') {
+      const alive = enemies.filter(e => !e.isDead);
+      for (const enemy of alive) {
+        const lostHp = enemy.maxHealth - enemy.currentHealth;
+        const damage = Math.floor(lostHp * 0.2);
+        targets.push({ unit: enemy, value: damage });
+      }
+      resultType = 'area';
+      message = `${caster.avatar} обрушивает ${skill.name}!`;
+      const result: SkillResult = { type: resultType, targets, message };
+      applySkillResults(get, set, caster, skill, skillType, result);
+      return result;
+    }
+    
+    // Calculate values for each target
+    for (const target of targetUnits) {
+      let value = 0;
+      let statusApplied: StatusEffectType | undefined;
+      
+      // Damage calculation
+      if (effect.damage || effect.damageMultiplier) {
+        const baseDamage = effect.damage || Math.floor(getEffectiveStat(caster, 'attack') * (effect.damageMultiplier || 1));
+        const dmgType = effect.damageType || caster.attackType;
+        value = calculateDamage(baseDamage, dmgType, target.physicalDefense, target.magicalDefense);
+        resultType = effect.area ? 'area' : 'damage';
+      }
+      
+      // Heal
+      if (effect.heal) {
+        value = effect.heal;
+        resultType = 'heal';
+      }
+      if (effect.healPercent) {
+        value = Math.floor(target.maxHealth * effect.healPercent / 100);
+        resultType = 'heal';
+      }
+      
+      // Status effect
+      if (effect.status) {
+        statusApplied = effect.status;
+        if (!value && !effect.damage && !effect.damageMultiplier && !effect.heal && !effect.healPercent) {
+          resultType = 'status';
+        }
+      }
+      
+      // Stat buffs (no damage value, it's a buff)
+      if (effect.statBuffs && !effect.damage && !effect.damageMultiplier && !effect.heal && !effect.healPercent) {
+        resultType = 'buff';
+      }
+      
+      // Self-targeting buffs
+      if (effect.guaranteedCrit || effect.ignoreRangePenalty) {
+        resultType = 'buff';
+      }
+      
+      targets.push({ unit: target, value, statusApplied });
+    }
+    
+    // Determine message
+    if (resultType === 'heal') {
+      const targetName = targetUnits.length === 1 ? targetUnits[0].name : 'союзников';
+      message = `${caster.avatar} исцеляет ${targetName}!`;
+    } else if (resultType === 'buff' || resultType === 'status') {
+      message = `${caster.avatar} активирует ${skill.name}!`;
+    } else if (resultType === 'area') {
+      message = `${caster.avatar} выпускает ${skill.name}!`;
+    } else {
+      message = `${caster.avatar} наносит ${skill.name}!`;
+    }
+    
+    const result: SkillResult = { type: resultType, targets, message };
+    applySkillResults(get, set, caster, skill, skillType, result, effect);
     return result;
   },
   
   selectedHeroId: null,
   setSelectedHeroId: (id) => set({ selectedHeroId: id }),
 }));
+
+// ===== UNIVERSAL RESULT APPLICATION =====
+// This function applies skill results without knowing which hero used it
+
+function applySkillResults(
+  get: () => GameState,
+  set: (partial: Partial<GameState> | ((state: GameState) => Partial<GameState>)) => void,
+  caster: BattleUnit,
+  skill: Skill,
+  skillType: 'active' | 'ultimate',
+  result: SkillResult,
+  effect?: SkillEffect
+) {
+  const updateUnit = (units: BattleUnit[], unitId: string, updates: Partial<BattleUnit>) =>
+    units.map(u => u.id === unitId ? { ...u, ...updates } : u);
+  
+  // Process each target
+  for (const { unit: target, value, statusApplied } of result.targets) {
+    const updates: Partial<BattleUnit> = {};
+    
+    if (result.type === 'damage' || result.type === 'area') {
+      const newHealth = Math.max(0, target.currentHealth - value);
+      const isDead = newHealth === 0;
+      updates.currentHealth = newHealth;
+      updates.isDead = isDead;
+      
+      if (isDead) {
+        get().addBattleLog(`☠️ ${target.name} повержен!`);
+      }
+    } else if (result.type === 'heal') {
+      // Check frozen — can't heal frozen units
+      if (!hasStatus(target, 'frozen')) {
+        const newHealth = Math.min(target.maxHealth, target.currentHealth + value);
+        updates.currentHealth = newHealth;
+        
+        // Healing removes bleeding
+        if (hasStatus(target, 'bleeding')) {
+          updates.statusEffects = target.statusEffects.filter(e => e.type !== 'bleeding');
+          get().addBattleLog(`🩸 Кровотечение снято с ${target.avatar} лечением`);
+        }
+      }
+    }
+    
+    // Apply status effect
+    if (statusApplied && effect) {
+      const updatedTarget = applyStatusToUnit(
+        { ...target, ...updates } as BattleUnit,
+        statusApplied,
+        effect.statusDuration || 1,
+        effect.statusStacks,
+        caster.id
+      );
+      updates.statusEffects = updatedTarget.statusEffects;
+    }
+    
+    // Apply stat buffs to target
+    if (effect?.statBuffs) {
+      const newBuffs = [...(target.temporaryBuffs || [])];
+      for (const buff of effect.statBuffs) {
+        newBuffs.push({
+          stat: buff.stat,
+          value: buff.value,
+          isPercent: buff.isPercent,
+          duration: buff.duration,
+          sourceSkillId: skill.id,
+        });
+      }
+      updates.temporaryBuffs = newBuffs;
+    }
+    
+    // Apply guaranteed crit / ignore range penalty flags
+    if (effect?.guaranteedCrit) {
+      updates.guaranteedCrit = true;
+    }
+    if (effect?.ignoreRangePenalty) {
+      updates.ignoreRangePenalty = true;
+    }
+    
+    if (Object.keys(updates).length > 0) {
+      if (target.owner === 'player') {
+        set(s => ({ playerUnits: updateUnit(s.playerUnits, target.id, updates) }));
+      } else {
+        set(s => ({ enemyUnits: updateUnit(s.enemyUnits, target.id, updates) }));
+      }
+      set(s => ({ turnOrder: updateUnit(s.turnOrder, target.id, updates) }));
+    }
+  }
+  
+  // Apply self-damage to caster
+  if (effect?.selfDamage || effect?.selfDamagePercent) {
+    const dmg = effect.selfDamage || Math.floor(caster.maxHealth * (effect.selfDamagePercent || 0) / 100);
+    const newHealth = Math.max(1, caster.currentHealth - dmg); // Don't kill self
+    const casterDmgUpdates = { currentHealth: newHealth };
+    if (caster.owner === 'player') {
+      set(s => ({ playerUnits: updateUnit(s.playerUnits, caster.id, casterDmgUpdates) }));
+    } else {
+      set(s => ({ enemyUnits: updateUnit(s.enemyUnits, caster.id, casterDmgUpdates) }));
+    }
+    set(s => ({ turnOrder: updateUnit(s.turnOrder, caster.id, casterDmgUpdates) }));
+    get().addBattleLog(`💔 ${caster.avatar} теряет ${dmg} HP`);
+  }
+  
+  // Update caster energy and action state
+  let casterEnergy = caster.currentEnergy;
+  if (skillType === 'ultimate') {
+    casterEnergy = Math.max(0, caster.currentEnergy - (skill.energyCost || 100));
+  } else {
+    casterEnergy = Math.min(caster.maxEnergy, caster.currentEnergy + 10);
+  }
+  
+  const casterUpdates: Partial<BattleUnit> = { 
+    hasActed: true, 
+    currentEnergy: casterEnergy,
+  };
+  
+  // Costs movement point (e.g. Precise Shot)
+  if (effect?.costsMovementPoint) {
+    casterUpdates.hasMoved = true;
+    casterUpdates.hasActed = false; // Doesn't cost action point
+  }
+  
+  // Set cooldown
+  if (skill.cooldown && skillType === 'active') {
+    casterUpdates.skillCooldowns = { ...(caster.skillCooldowns || {}), [skill.id]: skill.cooldown };
+  }
+  
+  if (caster.owner === 'player') {
+    set(s => ({ playerUnits: updateUnit(s.playerUnits, caster.id, casterUpdates) }));
+  } else {
+    set(s => ({ enemyUnits: updateUnit(s.enemyUnits, caster.id, casterUpdates) }));
+  }
+  set(s => ({ 
+    turnOrder: updateUnit(s.turnOrder, caster.id, casterUpdates),
+    selectedUnit: s.selectedUnit?.id === caster.id ? { ...s.selectedUnit, ...casterUpdates } : s.selectedUnit,
+    skillMode: null,
+    skillRange: new Set<string>(),
+  }));
+  
+  get().addBattleLog(result.message);
+}
