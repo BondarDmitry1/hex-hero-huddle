@@ -154,12 +154,12 @@ export const SkillPanel = ({
               <TooltipTrigger asChild>
                 <button
                   onClick={() => onUseSkill('active')}
-                  disabled={unit.hasActed}
+                  disabled={unit.hasActed || (unit.skillCooldowns?.[unit.skills.active.id] > 0)}
                   className={cn(
                     'w-10 h-10 flex items-center justify-center rounded-lg border-2 transition-all flex-shrink-0',
                     isActiveMode 
                       ? 'bg-amber-700/40 border-amber-400 ring-2 ring-amber-400/50 text-amber-300' 
-                      : !unit.hasActed 
+                      : !unit.hasActed && !(unit.skillCooldowns?.[unit.skills.active.id] > 0)
                         ? 'bg-amber-900/20 border-amber-500/50 hover:bg-amber-900/40 cursor-pointer text-amber-400'
                         : 'bg-amber-900/10 border-amber-500/20 opacity-50 cursor-not-allowed text-amber-400/50'
                   )}
@@ -646,12 +646,12 @@ export const SkillPanel = ({
         ) : (
           <button
             onClick={() => onUseSkill('active')}
-            disabled={unit.hasActed}
+            disabled={unit.hasActed || (unit.skillCooldowns?.[unit.skills.active.id] > 0)}
             className={cn(
               'w-full text-left rounded-lg p-3 transition-all border',
               isActiveMode 
                 ? 'bg-amber-500/30 border-amber-400 ring-2 ring-amber-400/50' 
-                : !unit.hasActed 
+                : !unit.hasActed && !(unit.skillCooldowns?.[unit.skills.active.id] > 0)
                   ? 'bg-amber-900/20 border-amber-500/30 hover:bg-amber-900/40 cursor-pointer'
                   : 'bg-amber-900/10 border-amber-500/20 opacity-50 cursor-not-allowed'
             )}
