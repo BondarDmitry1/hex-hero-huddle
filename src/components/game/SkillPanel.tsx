@@ -72,9 +72,40 @@ export const SkillPanel = ({
         icon: statusEffectIcons[se.type] || '❓',
       });
     });
+
+    // Temporary buffs as positive effects
+    const tempBuffPositive: Array<{ type: string; positive: boolean; icon: string; name: string; desc: string }> = [];
+    (unit.temporaryBuffs || []).forEach(buff => {
+      const statNames: Record<string, string> = {
+        attack: 'Атака', speed: 'Скорость', physicalDefense: 'Физ. защита',
+        magicalDefense: 'Маг. защита', initiative: 'Инициатива'
+      };
+      tempBuffPositive.push({
+        type: `buff_${buff.stat}`,
+        positive: true,
+        icon: buff.stat === 'speed' ? '💨' : buff.stat === 'attack' ? '⚔️' : buff.stat === 'initiative' ? '⚡' : '🛡️',
+        name: `+${buff.value} ${statNames[buff.stat] || buff.stat}`,
+        desc: `${buff.duration} ход. осталось${buff.sourceSkillId ? ` (от ${buff.sourceSkillId})` : ''}`,
+      });
+    });
+
+    // Shield Wall aura effect
+    const auraEffects: Array<{ type: string; positive: boolean; icon: string; name: string; desc: string }> = [];
+    // Check if this unit is a knight with shield wall aura (self)
+    if (unit.skills.passive.passiveEffect?.trigger === 'aura' && unit.skills.passive.passiveEffect?.rangedDamageReduction) {
+      auraEffects.push({
+        type: 'aura_shield_wall',
+        positive: true,
+        icon: '🛡️',
+        name: 'Стена Щитов (аура)',
+        desc: `-${Math.floor((unit.skills.passive.passiveEffect.rangedDamageReduction || 0) * 100)}% урона от дальних атак в радиусе ${unit.skills.passive.passiveEffect.area || 1}`,
+      });
+    }
     
     const allEffects = [
-      ...positiveEffects.map(e => ({ type: e.type, positive: true, icon: '🛡️', name: '', desc: '' })), 
+      ...auraEffects,
+      ...positiveEffects.map(e => ({ type: e.type, positive: true, icon: '🛡️', name: '', desc: '' })),
+      ...tempBuffPositive,
       ...negativeEffects.map(e => ({ ...e, positive: false }))
     ];
 
