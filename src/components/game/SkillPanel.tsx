@@ -614,10 +614,45 @@ export const SkillPanel = ({
       </div>
 
       {/* Status Effects */}
-      {((unit.statusEffects || []).length > 0 || unit.rangedBlocked) && (
+      {((unit.statusEffects || []).length > 0 || unit.rangedBlocked || (unit.temporaryBuffs || []).length > 0 || (unit.skills.passive.passiveEffect?.trigger === 'aura' && unit.skills.passive.passiveEffect?.rangedDamageReduction)) && (
         <div className="mb-4">
           <p className="text-xs text-muted-foreground mb-1">Статус-эффекты</p>
           <div className="flex flex-wrap gap-1">
+            {/* Aura */}
+            {unit.skills.passive.passiveEffect?.trigger === 'aura' && unit.skills.passive.passiveEffect?.rangedDamageReduction && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="px-1.5 py-0.5 rounded text-[10px] bg-green-900/40 border border-green-500/60 text-green-300 cursor-default">
+                    🛡️ {unit.skills.passive.name}
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p className="text-green-400">{unit.skills.passive.name}</p>
+                  <p className="text-xs text-muted-foreground">{unit.skills.passive.description}</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
+            {/* Temporary buffs */}
+            {(unit.temporaryBuffs || []).map((buff, idx) => {
+              const statNames: Record<string, string> = {
+                attack: 'Атака', speed: 'Скорость', physicalDefense: 'Физ. защита',
+                magicalDefense: 'Маг. защита', initiative: 'Инициатива'
+              };
+              const icon = buff.stat === 'speed' ? '💨' : buff.stat === 'attack' ? '⚔️' : '🛡️';
+              return (
+                <Tooltip key={`buff-${idx}`}>
+                  <TooltipTrigger asChild>
+                    <div className="px-1.5 py-0.5 rounded text-[10px] bg-green-900/40 border border-green-500/60 text-green-300 cursor-default">
+                      {icon} +{buff.value} {statNames[buff.stat]} ({buff.duration})
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p className="text-green-400">+{buff.value} {statNames[buff.stat]}</p>
+                    <p className="text-xs text-muted-foreground">{buff.duration} ход. осталось</p>
+                  </TooltipContent>
+                </Tooltip>
+              );
+            })}
             {unit.rangedBlocked && (
               <Tooltip>
                 <TooltipTrigger asChild>
