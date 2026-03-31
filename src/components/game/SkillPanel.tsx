@@ -294,8 +294,9 @@ export const SkillPanel = ({
               <TooltipContent className="max-w-xs">
                 <p className="font-semibold text-slate-300">Ждать</p>
                 <p className="text-xs text-muted-foreground">Герой перемещается в конец очереди инициативы</p>
-                <p className="text-xs mt-1">Зеркально относительно середины. Действует только в текущем раунде.</p>
+                <p className="text-xs mt-1">Требует оба очка (перемещения и действия). Они не расходуются. Действует только в текущем раунде.</p>
                 {unit.hasWaited && <p className="text-xs text-red-400 mt-1">Уже использовано в этом раунде</p>}
+                {!unit.hasWaited && (unit.hasMoved || unit.hasActed) && <p className="text-xs text-red-400 mt-1">Требуются оба очка</p>}
               </TooltipContent>
             </Tooltip>
 

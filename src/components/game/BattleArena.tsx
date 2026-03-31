@@ -623,7 +623,7 @@ export const BattleArena = () => {
   }, [currentUnit, skillMode, setSkillMode, setSkillRange, playerUnits, enemyUnits]);
 
   const handleWait = useCallback(() => {
-    if (currentUnit && currentUnit.owner === 'player') {
+    if (currentUnit && currentUnit.owner === 'player' && !currentUnit.hasMoved && !currentUnit.hasActed) {
       waitAction(currentUnit);
     }
   }, [currentUnit, waitAction]);
