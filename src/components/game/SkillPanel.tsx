@@ -72,9 +72,40 @@ export const SkillPanel = ({
         icon: statusEffectIcons[se.type] || '❓',
       });
     });
+
+    // Temporary buffs as positive effects
+    const tempBuffPositive: Array<{ type: string; positive: boolean; icon: string; name: string; desc: string }> = [];
+    (unit.temporaryBuffs || []).forEach(buff => {
+      const statNames: Record<string, string> = {
+        attack: 'Атака', speed: 'Скорость', physicalDefense: 'Физ. защита',
+        magicalDefense: 'Маг. защита', initiative: 'Инициатива'
+      };
+      tempBuffPositive.push({
+        type: `buff_${buff.stat}`,
+        positive: true,
+        icon: buff.stat === 'speed' ? '💨' : buff.stat === 'attack' ? '⚔️' : buff.stat === 'initiative' ? '⚡' : '🛡️',
+        name: `+${buff.value} ${statNames[buff.stat] || buff.stat}`,
+        desc: `${buff.duration} ход. осталось${buff.sourceSkillId ? ` (от ${buff.sourceSkillId})` : ''}`,
+      });
+    });
+
+    // Shield Wall aura effect
+    const auraEffects: Array<{ type: string; positive: boolean; icon: string; name: string; desc: string }> = [];
+    // Check if this unit is a knight with shield wall aura (self)
+    if (unit.skills.passive.passiveEffect?.trigger === 'aura' && unit.skills.passive.passiveEffect?.rangedDamageReduction) {
+      auraEffects.push({
+        type: 'aura_shield_wall',
+        positive: true,
+        icon: '🛡️',
+        name: 'Стена Щитов (аура)',
+        desc: `-${Math.floor((unit.skills.passive.passiveEffect.rangedDamageReduction || 0) * 100)}% урона от дальних атак в радиусе ${unit.skills.passive.passiveEffect.area || 1}`,
+      });
+    }
     
     const allEffects = [
-      ...positiveEffects.map(e => ({ type: e.type, positive: true, icon: '🛡️', name: '', desc: '' })), 
+      ...auraEffects,
+      ...positiveEffects.map(e => ({ type: e.type, positive: true, icon: '🛡️', name: '', desc: '' })),
+      ...tempBuffPositive,
       ...negativeEffects.map(e => ({ ...e, positive: false }))
     ];
 
@@ -156,7 +187,7 @@ export const SkillPanel = ({
                   onClick={() => onUseSkill('active')}
                   disabled={unit.hasActed || (unit.skillCooldowns?.[unit.skills.active.id] > 0)}
                   className={cn(
-                    'w-10 h-10 flex items-center justify-center rounded-lg border-2 transition-all flex-shrink-0',
+                    'w-10 h-10 flex items-center justify-center rounded-lg border-2 transition-all flex-shrink-0 relative',
                     isActiveMode 
                       ? 'bg-amber-700/40 border-amber-400 ring-2 ring-amber-400/50 text-amber-300' 
                       : !unit.hasActed && !(unit.skillCooldowns?.[unit.skills.active.id] > 0)
@@ -165,12 +196,20 @@ export const SkillPanel = ({
                   )}
                 >
                   {getSkillIcon(unit.skills.active.id, 'md')}
+                  {(unit.skillCooldowns?.[unit.skills.active.id] > 0) && (
+                    <span className="absolute inset-0 flex items-center justify-center text-lg font-bold text-foreground/60 bg-black/40 rounded-lg">
+                      {unit.skillCooldowns[unit.skills.active.id]}
+                    </span>
+                  )}
                 </button>
               </TooltipTrigger>
               <TooltipContent className="max-w-xs">
                 <p className="font-semibold text-amber-300">{unit.skills.active.name}</p>
                 <p className="text-xs text-muted-foreground">Активный навык</p>
                 <p className="text-xs mt-1">{unit.skills.active.description}</p>
+                {(unit.skillCooldowns?.[unit.skills.active.id] > 0) && (
+                  <p className="text-xs text-red-400 mt-1">Откат: {unit.skillCooldowns[unit.skills.active.id]} ход.</p>
+                )}
                 {isActiveMode && <p className="text-xs text-amber-400 mt-1">Выберите цель (или нажмите для отмены)</p>}
               </TooltipContent>
             </Tooltip>
@@ -575,10 +614,45 @@ export const SkillPanel = ({
       </div>
 
       {/* Status Effects */}
-      {((unit.statusEffects || []).length > 0 || unit.rangedBlocked) && (
+      {((unit.statusEffects || []).length > 0 || unit.rangedBlocked || (unit.temporaryBuffs || []).length > 0 || (unit.skills.passive.passiveEffect?.trigger === 'aura' && unit.skills.passive.passiveEffect?.rangedDamageReduction)) && (
         <div className="mb-4">
           <p className="text-xs text-muted-foreground mb-1">Статус-эффекты</p>
           <div className="flex flex-wrap gap-1">
+            {/* Aura */}
+            {unit.skills.passive.passiveEffect?.trigger === 'aura' && unit.skills.passive.passiveEffect?.rangedDamageReduction && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="px-1.5 py-0.5 rounded text-[10px] bg-green-900/40 border border-green-500/60 text-green-300 cursor-default">
+                    🛡️ {unit.skills.passive.name}
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p className="text-green-400">{unit.skills.passive.name}</p>
+                  <p className="text-xs text-muted-foreground">{unit.skills.passive.description}</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
+            {/* Temporary buffs */}
+            {(unit.temporaryBuffs || []).map((buff, idx) => {
+              const statNames: Record<string, string> = {
+                attack: 'Атака', speed: 'Скорость', physicalDefense: 'Физ. защита',
+                magicalDefense: 'Маг. защита', initiative: 'Инициатива'
+              };
+              const icon = buff.stat === 'speed' ? '💨' : buff.stat === 'attack' ? '⚔️' : '🛡️';
+              return (
+                <Tooltip key={`buff-${idx}`}>
+                  <TooltipTrigger asChild>
+                    <div className="px-1.5 py-0.5 rounded text-[10px] bg-green-900/40 border border-green-500/60 text-green-300 cursor-default">
+                      {icon} +{buff.value} {statNames[buff.stat]} ({buff.duration})
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p className="text-green-400">+{buff.value} {statNames[buff.stat]}</p>
+                    <p className="text-xs text-muted-foreground">{buff.duration} ход. осталось</p>
+                  </TooltipContent>
+                </Tooltip>
+              );
+            })}
             {unit.rangedBlocked && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -639,7 +713,9 @@ export const SkillPanel = ({
             <div className="flex items-center gap-2 mb-1">
               <span className="text-lg">{getSkillIcon(unit.skills.active.id, 'md')}</span>
               <span className="font-display text-sm text-amber-300">{unit.skills.active.name}</span>
-              <span className="text-[10px] text-amber-400 ml-auto">АКТИВНЫЙ</span>
+              <span className="text-[10px] text-amber-400 ml-auto">
+                АКТИВНЫЙ{(unit.skillCooldowns?.[unit.skills.active.id] > 0) ? ` • Откат: ${unit.skillCooldowns[unit.skills.active.id]}` : ''}
+              </span>
             </div>
             <p className="text-xs text-muted-foreground">{unit.skills.active.description}</p>
           </div>

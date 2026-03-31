@@ -386,11 +386,12 @@ export const HexGrid = ({
             className={cn(
               'font-display font-bold select-none pointer-events-none',
               popup.isHealing 
-                ? 'text-xl fill-green-400' 
+                ? 'fill-green-400' 
                 : popup.isCrit 
-                  ? 'text-2xl fill-amber-400' 
-                  : 'text-xl fill-destructive'
+                  ? 'fill-amber-400' 
+                  : 'fill-destructive'
             )}
+            style={{ fontSize: popup.isCrit ? '28px' : '22px' }}
             filter="url(#glow)"
           >
             {popup.isHealing ? `+${popup.damage}` : `-${popup.damage}`}
