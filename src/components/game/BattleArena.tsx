@@ -52,7 +52,7 @@ export const BattleArena = () => {
   
   const movementRange = useMemo(() => {
     if (selectedUnit && !selectedUnit.hasMoved && currentUnit?.id === selectedUnit.id) {
-      return getMovementRange(selectedUnit, allUnits, obstacles, GRID_WIDTH, GRID_HEIGHT);
+      return getMovementRange(selectedUnit, allUnits, obstacles, GRID_WIDTH, GRID_HEIGHT, getEffectiveStat(selectedUnit, 'speed'));
     }
     return new Set<string>();
   }, [selectedUnit, allUnits, obstacles, currentUnit]);
