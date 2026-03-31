@@ -713,7 +713,9 @@ export const SkillPanel = ({
             <div className="flex items-center gap-2 mb-1">
               <span className="text-lg">{getSkillIcon(unit.skills.active.id, 'md')}</span>
               <span className="font-display text-sm text-amber-300">{unit.skills.active.name}</span>
-              <span className="text-[10px] text-amber-400 ml-auto">АКТИВНЫЙ</span>
+              <span className="text-[10px] text-amber-400 ml-auto">
+                АКТИВНЫЙ{(unit.skillCooldowns?.[unit.skills.active.id] > 0) ? ` • Откат: ${unit.skillCooldowns[unit.skills.active.id]}` : ''}
+              </span>
             </div>
             <p className="text-xs text-muted-foreground">{unit.skills.active.description}</p>
           </div>
