@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { useGameStore, BattleUnit, hexDistance } from '@/store/gameStore';
+import { useGameStore, BattleUnit, hexDistance, getEffectiveStat } from '@/store/gameStore';
 import { HexGrid, generateObstacles, getMovementRange, DamagePopup, AttackAnimation, MeleeShakeUnit, ReactionPopup } from './HexGrid';
 import { SkillPanel } from './SkillPanel';
 import { cn } from '@/lib/utils';
