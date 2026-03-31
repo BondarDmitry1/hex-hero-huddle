@@ -497,7 +497,8 @@ export const getMovementRange = (
   units: BattleUnit[],
   obstacles: Set<string>,
   width: number,
-  height: number
+  height: number,
+  effectiveSpeed?: number
 ): Set<string> => {
   if (!unit.position) return new Set();
   
