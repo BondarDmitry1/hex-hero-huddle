@@ -349,7 +349,7 @@ export const BattleArena = () => {
         
         // Move towards player if can't attack
         if (!currentUnit.hasMoved) {
-          const range = getMovementRange(currentUnit, allUnits, obstacles, GRID_WIDTH, GRID_HEIGHT);
+          const range = getMovementRange(currentUnit, allUnits, obstacles, GRID_WIDTH, GRID_HEIGHT, getEffectiveStat(currentUnit, 'speed'));
           if (range.size > 0) {
             const rangeArray = Array.from(range);
             let bestPos = rangeArray[0];
