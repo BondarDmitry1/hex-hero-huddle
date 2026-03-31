@@ -497,9 +497,11 @@ export const getMovementRange = (
   units: BattleUnit[],
   obstacles: Set<string>,
   width: number,
-  height: number
+  height: number,
+  effectiveSpeed?: number
 ): Set<string> => {
   if (!unit.position) return new Set();
+  const speed = effectiveSpeed ?? unit.speed;
   
   const hasFlight = unit.trait === 'flight';
   const range = new Set<string>();
@@ -523,14 +525,14 @@ export const getMovementRange = (
     if (visited.has(key) && visited.get(key)! <= current.distance) continue;
     visited.set(key, current.distance);
     
-    if (current.distance > 0 && current.distance <= unit.speed) {
+    if (current.distance > 0 && current.distance <= speed) {
       // Can only stop on empty, non-obstacle hex
       if (!occupiedSet.has(key) && !obstacles.has(key)) {
         range.add(key);
       }
     }
     
-    if (current.distance < unit.speed) {
+    if (current.distance < speed) {
       const neighbors = getNeighbors(current.q, current.r);
       for (const n of neighbors) {
         const nKey = `${n.q},${n.r}`;

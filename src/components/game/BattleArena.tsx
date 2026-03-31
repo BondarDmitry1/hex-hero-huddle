@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { useGameStore, BattleUnit, hexDistance } from '@/store/gameStore';
+import { useGameStore, BattleUnit, hexDistance, getEffectiveStat } from '@/store/gameStore';
 import { HexGrid, generateObstacles, getMovementRange, DamagePopup, AttackAnimation, MeleeShakeUnit, ReactionPopup } from './HexGrid';
 import { SkillPanel } from './SkillPanel';
 import { cn } from '@/lib/utils';
@@ -52,7 +52,7 @@ export const BattleArena = () => {
   
   const movementRange = useMemo(() => {
     if (selectedUnit && !selectedUnit.hasMoved && currentUnit?.id === selectedUnit.id) {
-      return getMovementRange(selectedUnit, allUnits, obstacles, GRID_WIDTH, GRID_HEIGHT);
+      return getMovementRange(selectedUnit, allUnits, obstacles, GRID_WIDTH, GRID_HEIGHT, getEffectiveStat(selectedUnit, 'speed'));
     }
     return new Set<string>();
   }, [selectedUnit, allUnits, obstacles, currentUnit]);
@@ -304,7 +304,7 @@ export const BattleArena = () => {
                 
                 if (freshUnit && !freshUnit.hasMoved) {
                   const freshAllUnits = [...freshState.playerUnits, ...freshState.enemyUnits];
-                  const range = getMovementRange(freshUnit, freshAllUnits, obstacles, GRID_WIDTH, GRID_HEIGHT);
+                  const range = getMovementRange(freshUnit, freshAllUnits, obstacles, GRID_WIDTH, GRID_HEIGHT, getEffectiveStat(freshUnit, 'speed'));
                   if (range.size > 0) {
                     const rangeArray = Array.from(range);
                     let bestPos = rangeArray[0];
@@ -349,7 +349,7 @@ export const BattleArena = () => {
         
         // Move towards player if can't attack
         if (!currentUnit.hasMoved) {
-          const range = getMovementRange(currentUnit, allUnits, obstacles, GRID_WIDTH, GRID_HEIGHT);
+          const range = getMovementRange(currentUnit, allUnits, obstacles, GRID_WIDTH, GRID_HEIGHT, getEffectiveStat(currentUnit, 'speed'));
           if (range.size > 0) {
             const rangeArray = Array.from(range);
             let bestPos = rangeArray[0];
@@ -623,7 +623,7 @@ export const BattleArena = () => {
   }, [currentUnit, skillMode, setSkillMode, setSkillRange, playerUnits, enemyUnits]);
 
   const handleWait = useCallback(() => {
-    if (currentUnit && currentUnit.owner === 'player') {
+    if (currentUnit && currentUnit.owner === 'player' && !currentUnit.hasMoved && !currentUnit.hasActed) {
       waitAction(currentUnit);
     }
   }, [currentUnit, waitAction]);

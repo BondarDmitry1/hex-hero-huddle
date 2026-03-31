@@ -956,7 +956,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   waitAction: (unit) => {
     const state = get();
     
-    if (unit.hasWaited) return;
+    if (unit.hasWaited || unit.hasMoved || unit.hasActed) return;
     
     const aliveUnits = state.turnOrder.filter(u => !u.isDead);
     const currentPosInAlive = aliveUnits.findIndex(u => u.id === unit.id);
