@@ -304,7 +304,7 @@ export const BattleArena = () => {
                 
                 if (freshUnit && !freshUnit.hasMoved) {
                   const freshAllUnits = [...freshState.playerUnits, ...freshState.enemyUnits];
-                  const range = getMovementRange(freshUnit, freshAllUnits, obstacles, GRID_WIDTH, GRID_HEIGHT);
+                  const range = getMovementRange(freshUnit, freshAllUnits, obstacles, GRID_WIDTH, GRID_HEIGHT, getEffectiveStat(freshUnit, 'speed'));
                   if (range.size > 0) {
                     const rangeArray = Array.from(range);
                     let bestPos = rangeArray[0];
