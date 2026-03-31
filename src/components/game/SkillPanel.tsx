@@ -280,10 +280,10 @@ export const SkillPanel = ({
               <TooltipTrigger asChild>
                 <button
                   onClick={onWait}
-                  disabled={!onWait || unit.hasWaited}
+                  disabled={!onWait || unit.hasWaited || unit.hasMoved || unit.hasActed}
                   className={cn(
                     'w-10 h-10 flex items-center justify-center rounded-lg border-2 transition-all flex-shrink-0',
-                    onWait && !unit.hasWaited
+                    onWait && !unit.hasWaited && !unit.hasMoved && !unit.hasActed
                       ? 'bg-slate-900/30 border-slate-500/50 hover:bg-slate-900/50 cursor-pointer text-slate-300'
                       : 'bg-slate-900/10 border-slate-500/20 opacity-50 cursor-not-allowed text-slate-400/50'
                   )}
