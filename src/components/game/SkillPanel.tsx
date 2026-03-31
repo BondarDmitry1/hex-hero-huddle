@@ -187,7 +187,7 @@ export const SkillPanel = ({
                   onClick={() => onUseSkill('active')}
                   disabled={unit.hasActed || (unit.skillCooldowns?.[unit.skills.active.id] > 0)}
                   className={cn(
-                    'w-10 h-10 flex items-center justify-center rounded-lg border-2 transition-all flex-shrink-0',
+                    'w-10 h-10 flex items-center justify-center rounded-lg border-2 transition-all flex-shrink-0 relative',
                     isActiveMode 
                       ? 'bg-amber-700/40 border-amber-400 ring-2 ring-amber-400/50 text-amber-300' 
                       : !unit.hasActed && !(unit.skillCooldowns?.[unit.skills.active.id] > 0)
@@ -196,12 +196,20 @@ export const SkillPanel = ({
                   )}
                 >
                   {getSkillIcon(unit.skills.active.id, 'md')}
+                  {(unit.skillCooldowns?.[unit.skills.active.id] > 0) && (
+                    <span className="absolute inset-0 flex items-center justify-center text-lg font-bold text-foreground/60 bg-black/40 rounded-lg">
+                      {unit.skillCooldowns[unit.skills.active.id]}
+                    </span>
+                  )}
                 </button>
               </TooltipTrigger>
               <TooltipContent className="max-w-xs">
                 <p className="font-semibold text-amber-300">{unit.skills.active.name}</p>
                 <p className="text-xs text-muted-foreground">Активный навык</p>
                 <p className="text-xs mt-1">{unit.skills.active.description}</p>
+                {(unit.skillCooldowns?.[unit.skills.active.id] > 0) && (
+                  <p className="text-xs text-red-400 mt-1">Откат: {unit.skillCooldowns[unit.skills.active.id]} ход.</p>
+                )}
                 {isActiveMode && <p className="text-xs text-amber-400 mt-1">Выберите цель (или нажмите для отмены)</p>}
               </TooltipContent>
             </Tooltip>

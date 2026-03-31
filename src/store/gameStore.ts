@@ -1156,6 +1156,62 @@ export const useGameStore = create<GameState>((set, get) => ({
       const result: SkillResult = { type: resultType, targets, message };
       applySkillResults(get, set, caster, skill, skillType, result);
       return result;
+    } else if (effect.special === 'knockback') {
+      // Shield Bash: damage + knockback + stun
+      const target = allUnits.find(u => 
+        u.position?.q === targetPos.q && u.position?.r === targetPos.r && !u.isDead
+      );
+      if (target && target.position && caster.position) {
+        const dmg = calculateDamage(effect.damage || 50, effect.damageType || caster.attackType, target.physicalDefense, target.magicalDefense);
+        targets.push({ unit: target, value: dmg, statusApplied: effect.status });
+        resultType = 'damage';
+        message = `${caster.avatar} ${skill.name} → ${target.avatar}: ${dmg} урона + отбрасывание!`;
+        
+        const result: SkillResult = { type: resultType, targets, message };
+        applySkillResults(get, set, caster, skill, skillType, result, effect);
+        
+        // Knockback logic: push target 1 hex away from caster
+        const freshTarget = [...get().playerUnits, ...get().enemyUnits].find(u => u.id === target.id);
+        if (freshTarget && freshTarget.position && caster.position) {
+          const dq = freshTarget.position.q - caster.position.q;
+          const dr = freshTarget.position.r - caster.position.r;
+          const knockQ = freshTarget.position.q + Math.sign(dq);
+          const knockR = freshTarget.position.r + Math.sign(dr);
+          
+          const allNow = [...get().playerUnits, ...get().enemyUnits];
+          const isOccupied = (q: number, r: number) =>
+            allNow.some(u => u.position?.q === q && u.position?.r === r && !u.isDead && u.id !== freshTarget.id) ||
+            q < 0 || q >= 12 || r < 0 || r >= 11;
+          
+          let knockPos: { q: number; r: number } | null = null;
+          if (!isOccupied(knockQ, knockR)) {
+            knockPos = { q: knockQ, r: knockR };
+          } else {
+            const neighbors = getHexNeighbors(freshTarget.position.q, freshTarget.position.r);
+            for (const n of neighbors) {
+              if (!isOccupied(n.q, n.r) && hexDistance(n, caster.position) > 1) {
+                knockPos = n;
+                break;
+              }
+            }
+          }
+          
+          if (knockPos) {
+            const knockUpdate = { position: knockPos };
+            const updateUnit = (units: BattleUnit[], unitId: string, updates: Partial<BattleUnit>) =>
+              units.map(u => u.id === unitId ? { ...u, ...updates } : u);
+            if (freshTarget.owner === 'player') {
+              set(s => ({ playerUnits: updateUnit(s.playerUnits, freshTarget.id, knockUpdate) }));
+            } else {
+              set(s => ({ enemyUnits: updateUnit(s.enemyUnits, freshTarget.id, knockUpdate) }));
+            }
+            set(s => ({ turnOrder: updateUnit(s.turnOrder, freshTarget.id, knockUpdate) }));
+            get().addBattleLog(`💨 ${freshTarget.avatar} отброшен!`);
+          }
+        }
+        
+        return result;
+      }
     }
     
     // Calculate values for each target
