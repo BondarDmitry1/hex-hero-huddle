@@ -501,6 +501,7 @@ export const getMovementRange = (
   effectiveSpeed?: number
 ): Set<string> => {
   if (!unit.position) return new Set();
+  const speed = effectiveSpeed ?? unit.speed;
   
   const hasFlight = unit.trait === 'flight';
   const range = new Set<string>();
