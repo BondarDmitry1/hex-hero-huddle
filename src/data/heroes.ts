@@ -285,6 +285,7 @@ export const heroes: Hero[] = [
           range: 1,
           status: 'stunned',
           statusDuration: 1,
+          special: 'knockback',
         },
       },
     },
