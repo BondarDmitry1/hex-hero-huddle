@@ -1,4 +1,4 @@
-import { BattleUnit, SkillMode, getEffectiveStat } from '@/store/gameStore';
+import { BattleUnit, SkillMode, getEffectiveStat, hexDistance, hasStatus } from '@/store/gameStore';
 import { traitLabels, traitDescriptions, reactionLabels, reactionDescriptions, statusEffectLabels, statusEffectDescriptions, statusEffectIcons } from '@/data/heroes';
 import { cn } from '@/lib/utils';
 import { 
