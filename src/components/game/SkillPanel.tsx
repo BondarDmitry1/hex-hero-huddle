@@ -94,10 +94,10 @@ export const SkillPanel = ({
       });
     });
 
-    // Shield Wall aura effect
+    // Shield Wall aura effect - dynamic check: is this unit protected by a nearby knight's aura?
     const auraEffects: Array<{ type: string; positive: boolean; icon: string; name: string; desc: string }> = [];
-    // Check if this unit is a knight with shield wall aura (self)
-    if (unit.skills.passive.passiveEffect?.trigger === 'aura' && unit.skills.passive.passiveEffect?.rangedDamageReduction) {
+    // Check if this unit IS the aura source
+    if (unit.skills.passive.passiveEffect?.trigger === 'aura' && unit.skills.passive.passiveEffect?.rangedDamageReduction && !hasStatus(unit, 'suppressed')) {
       auraEffects.push({
         type: 'aura_shield_wall',
         positive: true,
@@ -105,6 +105,25 @@ export const SkillPanel = ({
         name: 'Стена Щитов (аура)',
         desc: `-${Math.floor((unit.skills.passive.passiveEffect.rangedDamageReduction || 0) * 100)}% урона от дальних атак в радиусе ${unit.skills.passive.passiveEffect.area || 1}`,
       });
+    } else if (unit.position) {
+      // Check if a nearby ally has a shield wall aura that covers this unit
+      const sameTeam = allUnits.filter(u => u.owner === unit.owner && !u.isDead && u.id !== unit.id);
+      for (const ally of sameTeam) {
+        if (!ally.position || hasStatus(ally, 'suppressed')) continue;
+        const passive = ally.skills.passive.passiveEffect;
+        if (!passive || passive.trigger !== 'aura' || !passive.rangedDamageReduction) continue;
+        const dist = hexDistance(unit.position, ally.position);
+        if (dist <= (passive.area || 1)) {
+          auraEffects.push({
+            type: 'aura_shield_wall',
+            positive: true,
+            icon: '🛡️',
+            name: `Стена Щитов (${ally.name})`,
+            desc: `-${Math.floor((passive.rangedDamageReduction || 0) * 100)}% урона от дальних атак`,
+          });
+          break;
+        }
+      }
     }
     
     const allEffects = [
