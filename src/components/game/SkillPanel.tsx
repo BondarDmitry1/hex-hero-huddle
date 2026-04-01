@@ -22,6 +22,7 @@ interface SkillPanelProps {
   skillMode?: SkillMode;
   isViewOnly?: boolean;
   isCompact?: boolean;
+  allUnits?: BattleUnit[];
 }
 
 export const SkillPanel = ({ 
