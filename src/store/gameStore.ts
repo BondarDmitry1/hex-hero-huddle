@@ -951,6 +951,12 @@ export const useGameStore = create<GameState>((set, get) => ({
       
       messages.forEach(m => get().addBattleLog(m));
       
+      // If stunned/frozen/sleeping/feared — mark as skipping turn
+      if (skipTurn) {
+        tickedUnit.hasMoved = true;
+        tickedUnit.hasActed = true;
+      }
+      
       const updateAll = (units: BattleUnit[]) =>
         units.map(u => u.id === nextUnit.id ? { ...tickedUnit } : u);
       
