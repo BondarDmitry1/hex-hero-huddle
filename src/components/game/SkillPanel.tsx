@@ -413,7 +413,7 @@ export const SkillPanel = ({
               <TooltipTrigger asChild>
                 <div className="bg-muted rounded px-1.5 py-0.5 flex items-center gap-1 cursor-default min-w-[28px]">
                   <Wind className="w-3 h-3 text-support flex-shrink-0" />
-                  <span className="text-support font-medium text-[11px] tabular-nums">{unit.speed}</span>
+                  <span className="text-support font-medium text-[11px] tabular-nums">{effectiveSpeed}{effectiveSpeed !== unit.speed ? ` (${unit.speed})` : ''}</span>
                 </div>
               </TooltipTrigger>
               <TooltipContent>
