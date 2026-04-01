@@ -269,7 +269,7 @@ export const heroes: Hero[] = [
         effect: {
           target: 'ally',
           range: 5,
-          statBuffs: [{ stat: 'speed', value: 2, duration: 2 }],
+          statBuffs: [{ stat: 'speed', value: 2, duration: 3 }],
         },
       },
       ultimate: {

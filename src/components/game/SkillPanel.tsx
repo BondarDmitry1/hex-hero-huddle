@@ -1,4 +1,4 @@
-import { BattleUnit, SkillMode } from '@/store/gameStore';
+import { BattleUnit, SkillMode, getEffectiveStat, hexDistance, hasStatus } from '@/store/gameStore';
 import { traitLabels, traitDescriptions, reactionLabels, reactionDescriptions, statusEffectLabels, statusEffectDescriptions, statusEffectIcons } from '@/data/heroes';
 import { cn } from '@/lib/utils';
 import { 
@@ -22,6 +22,7 @@ interface SkillPanelProps {
   skillMode?: SkillMode;
   isViewOnly?: boolean;
   isCompact?: boolean;
+  allUnits?: BattleUnit[];
 }
 
 export const SkillPanel = ({ 
@@ -32,7 +33,8 @@ export const SkillPanel = ({
   onEndTurn,
   skillMode, 
   isViewOnly = false, 
-  isCompact = false 
+  isCompact = false,
+  allUnits = [],
 }: SkillPanelProps) => {
   const canUseUltimate = unit.currentEnergy >= (unit.skills.ultimate.energyCost || 100);
   const isActiveMode = skillMode === 'active';
@@ -44,8 +46,11 @@ export const SkillPanel = ({
   const hasParryMag = unit.buffs?.some(b => b.type === 'parry_mag');
   
   // Calculate actual defenses with buffs
-  const physDef = unit.physicalDefense + (hasDefenseBuff ? 1 : 0) + (hasParryPhys ? 2 : 0);
-  const magDef = unit.magicalDefense + (hasDefenseBuff ? 1 : 0) + (hasParryMag ? 2 : 0);
+  const physDef = getEffectiveStat(unit, 'physicalDefense') + (hasDefenseBuff ? 1 : 0) + (hasParryPhys ? 2 : 0);
+  const magDef = getEffectiveStat(unit, 'magicalDefense') + (hasDefenseBuff ? 1 : 0) + (hasParryMag ? 2 : 0);
+  const effectiveSpeed = getEffectiveStat(unit, 'speed');
+  const effectiveAttack = getEffectiveStat(unit, 'attack');
+  const effectiveInit = getEffectiveStat(unit, 'initiative');
   
   if (isCompact) {
     const positiveEffects = unit.buffs?.filter(b => 
@@ -89,10 +94,10 @@ export const SkillPanel = ({
       });
     });
 
-    // Shield Wall aura effect
+    // Shield Wall aura effect - dynamic check: is this unit protected by a nearby knight's aura?
     const auraEffects: Array<{ type: string; positive: boolean; icon: string; name: string; desc: string }> = [];
-    // Check if this unit is a knight with shield wall aura (self)
-    if (unit.skills.passive.passiveEffect?.trigger === 'aura' && unit.skills.passive.passiveEffect?.rangedDamageReduction) {
+    // Check if this unit IS the aura source
+    if (unit.skills.passive.passiveEffect?.trigger === 'aura' && unit.skills.passive.passiveEffect?.rangedDamageReduction && !hasStatus(unit, 'suppressed')) {
       auraEffects.push({
         type: 'aura_shield_wall',
         positive: true,
@@ -100,6 +105,25 @@ export const SkillPanel = ({
         name: 'Стена Щитов (аура)',
         desc: `-${Math.floor((unit.skills.passive.passiveEffect.rangedDamageReduction || 0) * 100)}% урона от дальних атак в радиусе ${unit.skills.passive.passiveEffect.area || 1}`,
       });
+    } else if (unit.position) {
+      // Check if a nearby ally has a shield wall aura that covers this unit
+      const sameTeam = allUnits.filter(u => u.owner === unit.owner && !u.isDead && u.id !== unit.id);
+      for (const ally of sameTeam) {
+        if (!ally.position || hasStatus(ally, 'suppressed')) continue;
+        const passive = ally.skills.passive.passiveEffect;
+        if (!passive || passive.trigger !== 'aura' || !passive.rangedDamageReduction) continue;
+        const dist = hexDistance(unit.position, ally.position);
+        if (dist <= (passive.area || 1)) {
+          auraEffects.push({
+            type: 'aura_shield_wall',
+            positive: true,
+            icon: '🛡️',
+            name: `Стена Щитов (${ally.name})`,
+            desc: `-${Math.floor((passive.rangedDamageReduction || 0) * 100)}% урона от дальних атак`,
+          });
+          break;
+        }
+      }
     }
     
     const allEffects = [
@@ -363,7 +387,7 @@ export const SkillPanel = ({
                     <Sparkles className="w-3 h-3 text-violet-400 flex-shrink-0" />
                   )}
                   <span className={cn("font-medium text-[11px] tabular-nums", unit.attackType === 'physical' ? 'text-orange-400' : 'text-violet-400')}>
-                    {unit.attack}
+                    {effectiveAttack}{effectiveAttack !== unit.attack ? ` (${unit.attack})` : ''}
                   </span>
                 </div>
               </TooltipTrigger>
@@ -410,7 +434,7 @@ export const SkillPanel = ({
               <TooltipTrigger asChild>
                 <div className="bg-muted rounded px-1.5 py-0.5 flex items-center gap-1 cursor-default min-w-[28px]">
                   <Wind className="w-3 h-3 text-support flex-shrink-0" />
-                  <span className="text-support font-medium text-[11px] tabular-nums">{unit.speed}</span>
+                  <span className="text-support font-medium text-[11px] tabular-nums">{effectiveSpeed}{effectiveSpeed !== unit.speed ? ` (${unit.speed})` : ''}</span>
                 </div>
               </TooltipTrigger>
               <TooltipContent>
@@ -423,7 +447,7 @@ export const SkillPanel = ({
               <TooltipTrigger asChild>
                 <div className="bg-muted rounded px-1.5 py-0.5 flex items-center gap-1 cursor-default min-w-[28px]">
                   <Gauge className="w-3 h-3 text-primary flex-shrink-0" />
-                  <span className="text-primary font-medium text-[11px] tabular-nums">{unit.initiative}</span>
+                  <span className="text-primary font-medium text-[11px] tabular-nums">{effectiveInit}{effectiveInit !== unit.initiative ? ` (${unit.initiative})` : ''}</span>
                 </div>
               </TooltipTrigger>
               <TooltipContent>

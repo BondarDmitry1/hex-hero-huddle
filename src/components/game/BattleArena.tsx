@@ -251,12 +251,19 @@ export const BattleArena = () => {
     }, 800);
   }, [showReactionPopup, showReactionAttackAnimation]);
 
-  // Auto-select current unit
+  // Auto-select current unit / auto-end if stunned
   useEffect(() => {
-    if (currentUnit && currentUnit.owner === 'player' && !currentUnit.isDead) {
-      setSelectedUnit(currentUnit);
+    if (currentUnit && !currentUnit.isDead) {
+      if (currentUnit.hasMoved && currentUnit.hasActed) {
+        // Stunned/frozen/etc — auto-end turn after short delay
+        const timer = setTimeout(() => endTurn(), 800);
+        return () => clearTimeout(timer);
+      }
+      if (currentUnit.owner === 'player') {
+        setSelectedUnit(currentUnit);
+      }
     }
-  }, [currentUnit, setSelectedUnit]);
+  }, [currentUnit, setSelectedUnit, endTurn]);
 
   // AI for enemy turns
   useEffect(() => {
@@ -282,21 +289,41 @@ export const BattleArena = () => {
           });
         };
         
-        // Helper: pick best move position (closest to nearest player unit)
+        // Helper: pick best move position
         const pickBestMove = (unit: BattleUnit) => {
           const range = getMovementRange(unit, freshAllUnits, obstacles, GRID_WIDTH, GRID_HEIGHT, getEffectiveStat(unit, 'speed'));
           if (range.size === 0) return null;
           const rangeArray = Array.from(range);
+          
+          const isRangedUnit = unit.attackRange === 'ranged';
+          
           let bestPos = rangeArray[0];
-          let bestDist = Infinity;
+          let bestScore = -Infinity;
+          
           for (const pos of rangeArray) {
             const [q, r] = pos.split(',').map(Number);
+            let score = 0;
+            
             for (const t of freshAliveTargets) {
               if (t.position) {
                 const dist = hexDistance({ q, r }, t.position);
-                if (dist < bestDist) { bestDist = dist; bestPos = pos; }
+                if (isRangedUnit) {
+                  // Ranged AI: prefer staying at distance, avoid melee range
+                  if (dist === 1) {
+                    score -= 100; // Heavily penalize adjacent to enemy
+                  } else if (dist <= unit.range) {
+                    score += 50; // Good shooting distance
+                  } else {
+                    score += 20 - dist; // Still approach but not too close
+                  }
+                } else {
+                  // Melee AI: get as close as possible
+                  score = Math.max(score, 100 - dist);
+                }
               }
             }
+            
+            if (score > bestScore) { bestScore = score; bestPos = pos; }
           }
           return bestPos;
         };
@@ -770,6 +797,7 @@ export const BattleArena = () => {
                 skillMode={skillMode} 
                 isCompact 
                 isViewOnly={currentUnit.owner !== 'player'}
+                allUnits={allUnits}
               />
             ) : (
               <div className="text-muted-foreground text-sm py-4 text-center">Загрузка...</div>
@@ -780,7 +808,7 @@ export const BattleArena = () => {
         {/* Right sidebar - Hovered unit info */}
         <div className="w-60 flex-shrink-0 bg-secondary/20 border-l border-border p-2 overflow-y-auto">
           {hoveredUnit ? (
-            <SkillPanel unit={hoveredUnit} onUseSkill={() => {}} skillMode={null} isViewOnly />
+            <SkillPanel unit={hoveredUnit} onUseSkill={() => {}} skillMode={null} isViewOnly allUnits={allUnits} />
           ) : (
             <div className="text-center text-muted-foreground text-sm py-8">
               <p>Наведите на героя</p>
