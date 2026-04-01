@@ -366,7 +366,7 @@ export const SkillPanel = ({
                     <Sparkles className="w-3 h-3 text-violet-400 flex-shrink-0" />
                   )}
                   <span className={cn("font-medium text-[11px] tabular-nums", unit.attackType === 'physical' ? 'text-orange-400' : 'text-violet-400')}>
-                    {unit.attack}
+                    {effectiveAttack}{effectiveAttack !== unit.attack ? ` (${unit.attack})` : ''}
                   </span>
                 </div>
               </TooltipTrigger>
