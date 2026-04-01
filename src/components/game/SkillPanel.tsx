@@ -33,7 +33,8 @@ export const SkillPanel = ({
   onEndTurn,
   skillMode, 
   isViewOnly = false, 
-  isCompact = false 
+  isCompact = false,
+  allUnits = [],
 }: SkillPanelProps) => {
   const canUseUltimate = unit.currentEnergy >= (unit.skills.ultimate.energyCost || 100);
   const isActiveMode = skillMode === 'active';
