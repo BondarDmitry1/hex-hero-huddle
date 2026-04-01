@@ -426,7 +426,7 @@ export const SkillPanel = ({
               <TooltipTrigger asChild>
                 <div className="bg-muted rounded px-1.5 py-0.5 flex items-center gap-1 cursor-default min-w-[28px]">
                   <Gauge className="w-3 h-3 text-primary flex-shrink-0" />
-                  <span className="text-primary font-medium text-[11px] tabular-nums">{unit.initiative}</span>
+                  <span className="text-primary font-medium text-[11px] tabular-nums">{effectiveInit}{effectiveInit !== unit.initiative ? ` (${unit.initiative})` : ''}</span>
                 </div>
               </TooltipTrigger>
               <TooltipContent>
