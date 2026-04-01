@@ -781,7 +781,7 @@ export const BattleArena = () => {
         {/* Right sidebar - Hovered unit info */}
         <div className="w-60 flex-shrink-0 bg-secondary/20 border-l border-border p-2 overflow-y-auto">
           {hoveredUnit ? (
-            <SkillPanel unit={hoveredUnit} onUseSkill={() => {}} skillMode={null} isViewOnly />
+            <SkillPanel unit={hoveredUnit} onUseSkill={() => {}} skillMode={null} isViewOnly allUnits={allUnits} />
           ) : (
             <div className="text-center text-muted-foreground text-sm py-8">
               <p>Наведите на героя</p>
