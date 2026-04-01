@@ -251,12 +251,19 @@ export const BattleArena = () => {
     }, 800);
   }, [showReactionPopup, showReactionAttackAnimation]);
 
-  // Auto-select current unit
+  // Auto-select current unit / auto-end if stunned
   useEffect(() => {
-    if (currentUnit && currentUnit.owner === 'player' && !currentUnit.isDead) {
-      setSelectedUnit(currentUnit);
+    if (currentUnit && !currentUnit.isDead) {
+      if (currentUnit.hasMoved && currentUnit.hasActed) {
+        // Stunned/frozen/etc — auto-end turn after short delay
+        const timer = setTimeout(() => endTurn(), 800);
+        return () => clearTimeout(timer);
+      }
+      if (currentUnit.owner === 'player') {
+        setSelectedUnit(currentUnit);
+      }
     }
-  }, [currentUnit, setSelectedUnit]);
+  }, [currentUnit, setSelectedUnit, endTurn]);
 
   // AI for enemy turns
   useEffect(() => {
