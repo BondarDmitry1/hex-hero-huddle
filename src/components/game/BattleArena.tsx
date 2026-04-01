@@ -282,21 +282,41 @@ export const BattleArena = () => {
           });
         };
         
-        // Helper: pick best move position (closest to nearest player unit)
+        // Helper: pick best move position
         const pickBestMove = (unit: BattleUnit) => {
           const range = getMovementRange(unit, freshAllUnits, obstacles, GRID_WIDTH, GRID_HEIGHT, getEffectiveStat(unit, 'speed'));
           if (range.size === 0) return null;
           const rangeArray = Array.from(range);
+          
+          const isRangedUnit = unit.attackRange === 'ranged';
+          
           let bestPos = rangeArray[0];
-          let bestDist = Infinity;
+          let bestScore = -Infinity;
+          
           for (const pos of rangeArray) {
             const [q, r] = pos.split(',').map(Number);
+            let score = 0;
+            
             for (const t of freshAliveTargets) {
               if (t.position) {
                 const dist = hexDistance({ q, r }, t.position);
-                if (dist < bestDist) { bestDist = dist; bestPos = pos; }
+                if (isRangedUnit) {
+                  // Ranged AI: prefer staying at distance, avoid melee range
+                  if (dist === 1) {
+                    score -= 100; // Heavily penalize adjacent to enemy
+                  } else if (dist <= unit.range) {
+                    score += 50; // Good shooting distance
+                  } else {
+                    score += 20 - dist; // Still approach but not too close
+                  }
+                } else {
+                  // Melee AI: get as close as possible
+                  score = Math.max(score, 100 - dist);
+                }
               }
             }
+            
+            if (score > bestScore) { bestScore = score; bestPos = pos; }
           }
           return bestPos;
         };
