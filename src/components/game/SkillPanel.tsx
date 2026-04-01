@@ -44,8 +44,11 @@ export const SkillPanel = ({
   const hasParryMag = unit.buffs?.some(b => b.type === 'parry_mag');
   
   // Calculate actual defenses with buffs
-  const physDef = unit.physicalDefense + (hasDefenseBuff ? 1 : 0) + (hasParryPhys ? 2 : 0);
-  const magDef = unit.magicalDefense + (hasDefenseBuff ? 1 : 0) + (hasParryMag ? 2 : 0);
+  const physDef = getEffectiveStat(unit, 'physicalDefense') + (hasDefenseBuff ? 1 : 0) + (hasParryPhys ? 2 : 0);
+  const magDef = getEffectiveStat(unit, 'magicalDefense') + (hasDefenseBuff ? 1 : 0) + (hasParryMag ? 2 : 0);
+  const effectiveSpeed = getEffectiveStat(unit, 'speed');
+  const effectiveAttack = getEffectiveStat(unit, 'attack');
+  const effectiveInit = getEffectiveStat(unit, 'initiative');
   
   if (isCompact) {
     const positiveEffects = unit.buffs?.filter(b => 
