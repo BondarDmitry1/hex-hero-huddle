@@ -770,6 +770,7 @@ export const BattleArena = () => {
                 skillMode={skillMode} 
                 isCompact 
                 isViewOnly={currentUnit.owner !== 'player'}
+                allUnits={allUnits}
               />
             ) : (
               <div className="text-muted-foreground text-sm py-4 text-center">Загрузка...</div>
