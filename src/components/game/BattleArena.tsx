@@ -262,121 +262,133 @@ export const BattleArena = () => {
   useEffect(() => {
     if (currentUnit && currentUnit.owner === 'enemy' && !currentUnit.isDead && !gameOver && !animationLock) {
       const timer = setTimeout(() => {
-        // Check if enemy ranged unit is blocked by debuff
-        const enemyIsBlocked = currentUnit.rangedBlocked;
+        const freshState = useGameStore.getState();
+        const freshUnit = freshState.turnOrder[freshState.currentUnitIndex];
+        if (!freshUnit || freshUnit.owner !== 'enemy' || freshUnit.isDead) return;
         
-        // Try to attack first
-        if (!currentUnit.hasActed && currentUnit.position) {
-          const targets = alivePlayerUnits.filter(u => {
-            if (!u.position || !currentUnit.position) return false;
-            const distance = hexDistance(currentUnit.position, u.position);
-            if (currentUnit.attackRange === 'melee') {
-              return distance <= currentUnit.range;
-            }
-            // Ranged - if blocked by debuff, only adjacent
-            if (enemyIsBlocked) {
-              return distance === 1;
-            }
+        const enemyIsBlocked = freshUnit.rangedBlocked;
+        const freshAllUnits = [...freshState.playerUnits, ...freshState.enemyUnits];
+        const freshAliveTargets = freshState.playerUnits.filter(u => !u.isDead);
+        
+        // Helper: find attackable targets from current position
+        const findTargets = (unit: BattleUnit) => {
+          if (!unit.position || unit.hasActed) return [];
+          return freshAliveTargets.filter(u => {
+            if (!u.position) return false;
+            const distance = hexDistance(unit.position!, u.position);
+            if (unit.attackRange === 'melee') return distance <= unit.range;
+            if (enemyIsBlocked) return distance === 1;
             return true;
           });
-          
-          if (targets.length > 0) {
-            const target = targets.sort((a, b) => a.currentHealth - b.currentHealth)[0];
-            const isForcedMelee = (enemyIsBlocked || currentUnit.hasMoved) && target.position && 
-              hexDistance(currentUnit.position!, target.position) === 1;
-            
-            showAttackAnimation(currentUnit, target, () => {
-              const result = attackUnit(currentUnit, target);
-              if (target.position) {
-                const freshAll = [...useGameStore.getState().playerUnits, ...useGameStore.getState().enemyUnits];
-                handleAttackResult(result, target.position, freshAll);
-              }
-            }, !!isForcedMelee);
-            
-            // Wait for animation lock to clear before continuing AI turn
-            const waitForAnimEnd = () => {
-              const checkInterval = setInterval(() => {
-                // Check if animations are done by looking at current state
-                const freshState = useGameStore.getState();
-                const freshUnit = freshState.turnOrder[freshState.currentUnitIndex];
-                
-                clearInterval(checkInterval);
-                
-                if (freshUnit && !freshUnit.hasMoved) {
-                  const freshAllUnits = [...freshState.playerUnits, ...freshState.enemyUnits];
-                  const range = getMovementRange(freshUnit, freshAllUnits, obstacles, GRID_WIDTH, GRID_HEIGHT, getEffectiveStat(freshUnit, 'speed'));
-                  if (range.size > 0) {
-                    const rangeArray = Array.from(range);
-                    let bestPos = rangeArray[0];
-                    let bestDist = Infinity;
-                    
-                    for (const pos of rangeArray) {
-                      const [q, r] = pos.split(',').map(Number);
-                      for (const t of alivePlayerUnits) {
-                        if (t.position) {
-                          const dist = hexDistance({ q, r }, t.position);
-                          if (dist < bestDist) {
-                            bestDist = dist;
-                            bestPos = pos;
-                          }
-                        }
-                      }
-                    }
-                    
-                    const [q, r] = bestPos.split(',').map(Number);
-                    const moveResult = moveUnit(freshUnit, { q, r });
-                    if (moveResult?.provokedAttack) {
-                      handleProvokedAnimation(moveResult.provokedAttack);
-                    }
-                  }
-                }
-                
-                // Wait for any remaining animations
-                setTimeout(() => {
-                  const waitEnd = setInterval(() => {
-                    clearInterval(waitEnd);
-                    endTurn();
-                  }, 300);
-                }, 500);
-              }, 200);
-            };
-            
-            // Start waiting after a minimum delay for projectile
-            setTimeout(waitForAnimEnd, 800);
-            return;
-          }
-        }
+        };
         
-        // Move towards player if can't attack
-        if (!currentUnit.hasMoved) {
-          const range = getMovementRange(currentUnit, allUnits, obstacles, GRID_WIDTH, GRID_HEIGHT, getEffectiveStat(currentUnit, 'speed'));
-          if (range.size > 0) {
-            const rangeArray = Array.from(range);
-            let bestPos = rangeArray[0];
-            let bestDist = Infinity;
-            
-            for (const pos of rangeArray) {
-              const [q, r] = pos.split(',').map(Number);
-              for (const target of alivePlayerUnits) {
-                if (target.position) {
-                  const dist = hexDistance({ q, r }, target.position);
-                  if (dist < bestDist) {
-                    bestDist = dist;
-                    bestPos = pos;
-                  }
-                }
+        // Helper: pick best move position (closest to nearest player unit)
+        const pickBestMove = (unit: BattleUnit) => {
+          const range = getMovementRange(unit, freshAllUnits, obstacles, GRID_WIDTH, GRID_HEIGHT, getEffectiveStat(unit, 'speed'));
+          if (range.size === 0) return null;
+          const rangeArray = Array.from(range);
+          let bestPos = rangeArray[0];
+          let bestDist = Infinity;
+          for (const pos of rangeArray) {
+            const [q, r] = pos.split(',').map(Number);
+            for (const t of freshAliveTargets) {
+              if (t.position) {
+                const dist = hexDistance({ q, r }, t.position);
+                if (dist < bestDist) { bestDist = dist; bestPos = pos; }
               }
             }
-            
+          }
+          return bestPos;
+        };
+        
+        // Helper: perform attack with animation, returns promise-like via callback
+        const doAttack = (unit: BattleUnit, onDone: () => void) => {
+          const targets = findTargets(unit);
+          if (targets.length === 0) { onDone(); return; }
+          const target = targets.sort((a, b) => a.currentHealth - b.currentHealth)[0];
+          const isForcedMelee = enemyIsBlocked && target.position && hexDistance(unit.position!, target.position!) === 1;
+          
+          showAttackAnimation(unit, target, () => {
+            const result = attackUnit(unit, target);
+            if (target.position) {
+              const latestAll = [...useGameStore.getState().playerUnits, ...useGameStore.getState().enemyUnits];
+              handleAttackResult(result, target.position, latestAll);
+            }
+            // Wait for damage popup / reaction animations
+            const waitForUnlock = setInterval(() => {
+              clearInterval(waitForUnlock);
+              onDone();
+            }, 1600);
+          }, !!isForcedMelee);
+        };
+        
+        // === AI STRATEGY ===
+        // 1. Can attack from current position? Attack first, then move, then end
+        // 2. Can't attack? Move first, then try to attack, then end
+        
+        const currentTargets = findTargets(freshUnit);
+        
+        if (currentTargets.length > 0 && !freshUnit.hasActed) {
+          // Attack first
+          doAttack(freshUnit, () => {
+            // After attack, try to move (retreat ranged, advance melee)
+            const postState = useGameStore.getState();
+            const postUnit = postState.turnOrder[postState.currentUnitIndex];
+            if (postUnit && !postUnit.hasMoved && !postUnit.isDead) {
+              const bestPos = pickBestMove(postUnit);
+              if (bestPos) {
+                const [q, r] = bestPos.split(',').map(Number);
+                const moveResult = moveUnit(postUnit, { q, r });
+                if (moveResult?.provokedAttack) handleProvokedAnimation(moveResult.provokedAttack);
+              }
+            }
+            setTimeout(() => endTurn(), 400);
+          });
+        } else if (!freshUnit.hasMoved) {
+          // Move first
+          const bestPos = pickBestMove(freshUnit);
+          if (bestPos) {
             const [q, r] = bestPos.split(',').map(Number);
-            const moveResult = moveUnit(currentUnit, { q, r });
+            const moveResult = moveUnit(freshUnit, { q, r });
             if (moveResult?.provokedAttack) {
               handleProvokedAnimation(moveResult.provokedAttack);
             }
           }
+          
+          // Then try to attack after moving
+          setTimeout(() => {
+            const postState = useGameStore.getState();
+            const postUnit = postState.turnOrder[postState.currentUnitIndex];
+            if (postUnit && !postUnit.hasActed && !postUnit.isDead && postUnit.position) {
+              const postTargets = postState.playerUnits.filter(u => {
+                if (u.isDead || !u.position || !postUnit.position) return false;
+                const dist = hexDistance(postUnit.position!, u.position);
+                if (postUnit.attackRange === 'melee') return dist <= postUnit.range;
+                if (postUnit.rangedBlocked) return dist === 1;
+                return true;
+              });
+              
+              if (postTargets.length > 0) {
+                const target = postTargets.sort((a, b) => a.currentHealth - b.currentHealth)[0];
+                const isForcedMelee = postUnit.rangedBlocked && target.position && hexDistance(postUnit.position!, target.position!) === 1;
+                showAttackAnimation(postUnit, target, () => {
+                  const result = attackUnit(postUnit, target);
+                  if (target.position) {
+                    const latestAll = [...useGameStore.getState().playerUnits, ...useGameStore.getState().enemyUnits];
+                    handleAttackResult(result, target.position, latestAll);
+                  }
+                  setTimeout(() => endTurn(), 1600);
+                }, !!isForcedMelee);
+              } else {
+                endTurn();
+              }
+            } else {
+              endTurn();
+            }
+          }, 500);
+        } else {
+          endTurn();
         }
-        
-        setTimeout(() => endTurn(), 500);
       }, 600);
       
       return () => clearTimeout(timer);
