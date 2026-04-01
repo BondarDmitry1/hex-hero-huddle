@@ -553,6 +553,22 @@ export const useGameStore = create<GameState>((set, get) => ({
     const effectiveAttack = getEffectiveStat(attacker, 'attack');
     let damage = calculateDamage(effectiveAttack, attacker.attackType, effectivePhysDef, effectiveMagDef);
     
+    // Knight aura: 30% ranged damage reduction for allies near a knight with shield_wall aura
+    if (!isMeleeAttack && target.position) {
+      const targetAllies = target.owner === 'player' ? state.playerUnits : state.enemyUnits;
+      const hasAuraProtection = targetAllies.some(ally => {
+        if (ally.isDead || !ally.position || hasStatus(ally, 'suppressed')) return false;
+        const passive = ally.skills.passive.passiveEffect;
+        if (!passive || passive.trigger !== 'aura' || !passive.rangedDamageReduction) return false;
+        const dist = hexDistance(target.position!, ally.position);
+        return dist <= (passive.area || 1);
+      });
+      if (hasAuraProtection) {
+        damage = Math.floor(damage * 0.7);
+        get().addBattleLog(`🛡️ ${target.avatar} защищён аурой: -30% урона от стрел`);
+      }
+    }
+    
     // Ranged penalties
     if (attacker.attackRange === 'ranged' && forcedMelee && attacker.trait !== 'no_melee_penalty') {
       damage = Math.floor(damage / 3);
