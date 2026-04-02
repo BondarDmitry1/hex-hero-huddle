@@ -41,6 +41,35 @@ export const SkillPanel = ({
   const isUltimateMode = skillMode === 'ultimate';
   const isPassiveActive = true;
   
+  const dynamicAuraEffects: Array<{ type: string; positive: boolean; icon: string; name: string; desc: string }> = [];
+  if (unit.skills.passive.passiveEffect?.trigger === 'aura' && unit.skills.passive.passiveEffect?.rangedDamageReduction && !hasStatus(unit, 'suppressed')) {
+    dynamicAuraEffects.push({
+      type: 'aura_shield_wall',
+      positive: true,
+      icon: '🛡️',
+      name: 'Стена Щитов (аура)',
+      desc: `-${Math.floor((unit.skills.passive.passiveEffect.rangedDamageReduction || 0) * 100)}% урона от дальних атак в радиусе ${unit.skills.passive.passiveEffect.area || 1}`,
+    });
+  } else if (unit.position) {
+    const sameTeam = allUnits.filter(u => u.owner === unit.owner && !u.isDead && u.id !== unit.id);
+    for (const ally of sameTeam) {
+      if (!ally.position || hasStatus(ally, 'suppressed')) continue;
+      const passive = ally.skills.passive.passiveEffect;
+      if (!passive || passive.trigger !== 'aura' || !passive.rangedDamageReduction) continue;
+
+      if (hexDistance(unit.position, ally.position) <= (passive.area || 1)) {
+        dynamicAuraEffects.push({
+          type: 'aura_shield_wall',
+          positive: true,
+          icon: '🛡️',
+          name: `Стена Щитов (${ally.name})`,
+          desc: `-${Math.floor((passive.rangedDamageReduction || 0) * 100)}% урона от дальних атак`,
+        });
+        break;
+      }
+    }
+  }
+  
   const hasDefenseBuff = unit.buffs?.some(b => b.type === 'defense_boost');
   const hasParryPhys = unit.buffs?.some(b => b.type === 'parry_phys');
   const hasParryMag = unit.buffs?.some(b => b.type === 'parry_mag');
@@ -94,40 +123,8 @@ export const SkillPanel = ({
       });
     });
 
-    // Shield Wall aura effect - dynamic check: is this unit protected by a nearby knight's aura?
-    const auraEffects: Array<{ type: string; positive: boolean; icon: string; name: string; desc: string }> = [];
-    // Check if this unit IS the aura source
-    if (unit.skills.passive.passiveEffect?.trigger === 'aura' && unit.skills.passive.passiveEffect?.rangedDamageReduction && !hasStatus(unit, 'suppressed')) {
-      auraEffects.push({
-        type: 'aura_shield_wall',
-        positive: true,
-        icon: '🛡️',
-        name: 'Стена Щитов (аура)',
-        desc: `-${Math.floor((unit.skills.passive.passiveEffect.rangedDamageReduction || 0) * 100)}% урона от дальних атак в радиусе ${unit.skills.passive.passiveEffect.area || 1}`,
-      });
-    } else if (unit.position) {
-      // Check if a nearby ally has a shield wall aura that covers this unit
-      const sameTeam = allUnits.filter(u => u.owner === unit.owner && !u.isDead && u.id !== unit.id);
-      for (const ally of sameTeam) {
-        if (!ally.position || hasStatus(ally, 'suppressed')) continue;
-        const passive = ally.skills.passive.passiveEffect;
-        if (!passive || passive.trigger !== 'aura' || !passive.rangedDamageReduction) continue;
-        const dist = hexDistance(unit.position, ally.position);
-        if (dist <= (passive.area || 1)) {
-          auraEffects.push({
-            type: 'aura_shield_wall',
-            positive: true,
-            icon: '🛡️',
-            name: `Стена Щитов (${ally.name})`,
-            desc: `-${Math.floor((passive.rangedDamageReduction || 0) * 100)}% урона от дальних атак`,
-          });
-          break;
-        }
-      }
-    }
-    
     const allEffects = [
-      ...auraEffects,
+      ...dynamicAuraEffects,
       ...positiveEffects.map(e => ({ type: e.type, positive: true, icon: '🛡️', name: '', desc: '' })),
       ...tempBuffPositive,
       ...negativeEffects.map(e => ({ ...e, positive: false }))
@@ -639,24 +636,23 @@ export const SkillPanel = ({
       </div>
 
       {/* Status Effects */}
-      {((unit.statusEffects || []).length > 0 || unit.rangedBlocked || (unit.temporaryBuffs || []).length > 0 || (unit.skills.passive.passiveEffect?.trigger === 'aura' && unit.skills.passive.passiveEffect?.rangedDamageReduction)) && (
+      {((unit.statusEffects || []).length > 0 || unit.rangedBlocked || (unit.temporaryBuffs || []).length > 0 || dynamicAuraEffects.length > 0) && (
         <div className="mb-4">
           <p className="text-xs text-muted-foreground mb-1">Статус-эффекты</p>
           <div className="flex flex-wrap gap-1">
-            {/* Aura */}
-            {unit.skills.passive.passiveEffect?.trigger === 'aura' && unit.skills.passive.passiveEffect?.rangedDamageReduction && (
+            {dynamicAuraEffects.map((effect, idx) => (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <div className="px-1.5 py-0.5 rounded text-[10px] bg-green-900/40 border border-green-500/60 text-green-300 cursor-default">
-                    🛡️ {unit.skills.passive.name}
+                    {effect.icon} {effect.name}
                   </div>
                 </TooltipTrigger>
                 <TooltipContent>
-                  <p className="text-green-400">{unit.skills.passive.name}</p>
-                  <p className="text-xs text-muted-foreground">{unit.skills.passive.description}</p>
+                  <p className="text-green-400">{effect.name}</p>
+                  <p className="text-xs text-muted-foreground">{effect.desc}</p>
                 </TooltipContent>
               </Tooltip>
-            )}
+            ))}
             {/* Temporary buffs */}
             {(unit.temporaryBuffs || []).map((buff, idx) => {
               const statNames: Record<string, string> = {
