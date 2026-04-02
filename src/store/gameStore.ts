@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { Hero, heroes, calculateDamage, HeroTrait, HeroReaction, StatusEffect, StatusEffectType, SkillEffect, Skill } from '@/data/heroes';
+import { applyCubeStep, getCubeStepDirection, hasObstacleBetween, isWithinBoard } from '@/lib/hex-combat';
 
 export type GamePhase = 'menu' | 'heroes' | 'draft' | 'placement' | 'battle';
 export type Player = 'player' | 'enemy';
@@ -42,6 +43,13 @@ export interface SkillResult {
   message: string;
 }
 
+export interface BattlefieldContext {
+  obstacles?: Set<string>;
+  destroyObstacle?: (key: string) => void;
+  width?: number;
+  height?: number;
+}
+
 interface GameState {
   phase: GamePhase;
   setPhase: (phase: GamePhase) => void;
@@ -70,9 +78,9 @@ interface GameState {
   setSelectedUnit: (unit: BattleUnit | null) => void;
   setHoveredUnit: (unit: BattleUnit | null) => void;
   moveUnit: (unit: BattleUnit, position: { q: number; r: number }) => { provokedAttack?: { attackerId: string; damage: number; attackerPos: { q: number; r: number }; targetPos: { q: number; r: number } } };
-  attackUnit: (attacker: BattleUnit, target: BattleUnit) => { damage: number; isCrit: boolean; parryTriggered?: boolean; reaction?: { type: string; reactorId: string; damage?: number; isMelee?: boolean; reactorPos?: { q: number; r: number }; targetPos?: { q: number; r: number } } };
+  attackUnit: (attacker: BattleUnit, target: BattleUnit, obstacles?: Set<string>) => { damage: number; isCrit: boolean; parryTriggered?: boolean; reaction?: { type: string; reactorId: string; damage?: number; isMelee?: boolean; reactorPos?: { q: number; r: number }; targetPos?: { q: number; r: number } } };
   markUnitActed: (unitId: string, alsoMoved?: boolean) => void;
-  useSkill: (caster: BattleUnit, targetPos: { q: number; r: number }, skillType: 'active' | 'ultimate') => SkillResult | null;
+  useSkill: (caster: BattleUnit, targetPos: { q: number; r: number }, skillType: 'active' | 'ultimate', battlefield?: BattlefieldContext) => SkillResult | null;
   endTurn: () => void;
   
   waitAction: (unit: BattleUnit) => void;
@@ -494,7 +502,7 @@ export const useGameStore = create<GameState>((set, get) => ({
     return { provokedAttack: provokedResult };
   },
   
-  attackUnit: (attacker, target) => {
+  attackUnit: (attacker, target, obstacles) => {
     const state = get();
     
     if (!attacker.position || !target.position) {
@@ -508,21 +516,27 @@ export const useGameStore = create<GameState>((set, get) => ({
     }
     
     let forcedMelee = false;
-    let hasDamagePenalty = false;
+    let hasRangePenalty = false;
+    let hasObstaclePenalty = false;
     if (attacker.attackRange === 'ranged') {
       if (attacker.rangedBlocked) {
         if (distance === 1) {
-          if (attacker.trait !== 'no_melee_penalty') hasDamagePenalty = true;
+          if (attacker.trait !== 'no_melee_penalty') hasRangePenalty = true;
           forcedMelee = true;
         } else {
           return { damage: 0, isCrit: false };
         }
       } else if (distance > attacker.range && !attacker.ignoreRangePenalty) {
-        hasDamagePenalty = true;
+        hasRangePenalty = true;
+      }
+
+      if (!forcedMelee && obstacles && hasObstacleBetween(attacker.position, target.position, obstacles)) {
+        hasObstaclePenalty = true;
       }
     }
     
     const isMeleeAttack = attacker.attackRange === 'melee' || forcedMelee;
+    const hasDamagePenalty = hasRangePenalty || hasObstaclePenalty;
     
     let effectivePhysDef = target.physicalDefense;
     let effectiveMagDef = target.magicalDefense;
@@ -549,25 +563,26 @@ export const useGameStore = create<GameState>((set, get) => ({
       }
     }
     
-    // Use effective attack stat (includes temp buffs)
-    const effectiveAttack = getEffectiveStat(attacker, 'attack');
-    let damage = calculateDamage(effectiveAttack, attacker.attackType, effectivePhysDef, effectiveMagDef);
-    
-    // Knight aura: 30% ranged damage reduction for allies near a knight with shield_wall aura
+    // Knight aura: ranged damage reduction is applied BEFORE target defenses
+    let effectiveAttack = getEffectiveStat(attacker, 'attack');
     if (!isMeleeAttack && target.position) {
       const targetAllies = target.owner === 'player' ? state.playerUnits : state.enemyUnits;
-      const hasAuraProtection = targetAllies.some(ally => {
+      const auraSource = targetAllies.find(ally => {
         if (ally.isDead || !ally.position || hasStatus(ally, 'suppressed')) return false;
         const passive = ally.skills.passive.passiveEffect;
         if (!passive || passive.trigger !== 'aura' || !passive.rangedDamageReduction) return false;
         const dist = hexDistance(target.position!, ally.position);
         return dist <= (passive.area || 1);
       });
-      if (hasAuraProtection) {
-        damage = Math.floor(damage * 0.7);
-        get().addBattleLog(`🛡️ ${target.avatar} защищён аурой: -30% урона от стрел`);
+
+      if (auraSource?.skills.passive.passiveEffect?.rangedDamageReduction) {
+        const reduction = auraSource.skills.passive.passiveEffect.rangedDamageReduction;
+        effectiveAttack = Math.max(0, Math.floor(effectiveAttack * (1 - reduction)));
+        get().addBattleLog(`🛡️ ${target.avatar} защищён аурой ${auraSource.avatar}: -${Math.floor(reduction * 100)}% урона от стрел`);
       }
     }
+
+    let damage = calculateDamage(effectiveAttack, attacker.attackType, effectivePhysDef, effectiveMagDef);
     
     // Ranged penalties
     if (attacker.attackRange === 'ranged' && forcedMelee && attacker.trait !== 'no_melee_penalty') {
@@ -802,7 +817,11 @@ export const useGameStore = create<GameState>((set, get) => ({
     if (attacker.attackRange === 'ranged') {
       if (forcedMelee) {
         distanceText = attacker.trait === 'no_melee_penalty' ? '' : ' (ближний бой -66%)';
-      } else if (distance > attacker.range && !attacker.ignoreRangePenalty) {
+      } else if (hasRangePenalty && hasObstaclePenalty) {
+        distanceText = ' (дальность/препятствие -50%)';
+      } else if (hasObstaclePenalty) {
+        distanceText = ' (препятствие -50%)';
+      } else if (hasRangePenalty) {
         distanceText = ' (дальность -50%)';
       }
     }
@@ -812,7 +831,7 @@ export const useGameStore = create<GameState>((set, get) => ({
     return { damage, isCrit, parryTriggered, reaction: reactionResult };
   },
   
-  endTurn: () => {
+    endTurn: () => {
     const state = get();
     const currentUnit = state.turnOrder[state.currentUnitIndex];
     
@@ -923,6 +942,7 @@ export const useGameStore = create<GameState>((set, get) => ({
     // Process start-of-turn effects for the next unit
     const updatedState = get();
     const nextUnit = updatedState.turnOrder[nextIndex];
+    let skippedUnitId: string | null = null;
     if (nextUnit && !nextUnit.isDead) {
       // Tick temporary buffs and cooldowns
       let processed = tickTemporaryBuffs(nextUnit);
@@ -955,6 +975,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       if (skipTurn) {
         tickedUnit.hasMoved = true;
         tickedUnit.hasActed = true;
+        skippedUnitId = tickedUnit.id;
       }
       
       const updateAll = (units: BattleUnit[]) =>
@@ -973,6 +994,16 @@ export const useGameStore = create<GameState>((set, get) => ({
       skillMode: null,
       skillRange: new Set<string>(),
     });
+
+    if (skippedUnitId) {
+      setTimeout(() => {
+        const latestState = get();
+        const activeUnit = latestState.turnOrder[latestState.currentUnitIndex];
+        if (activeUnit?.id === skippedUnitId) {
+          get().endTurn();
+        }
+      }, 350);
+    }
   },
   
   waitAction: (unit) => {
@@ -1056,7 +1087,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   },
   
   // ===== UNIVERSAL SKILL SYSTEM =====
-  useSkill: (caster, targetPos, skillType) => {
+  useSkill: (caster, targetPos, skillType, battlefield) => {
     const state = get();
     const skill = skillType === 'active' ? caster.skills.active : caster.skills.ultimate;
     const effect = skill.effect;
@@ -1191,45 +1222,69 @@ export const useGameStore = create<GameState>((set, get) => ({
         
         const result: SkillResult = { type: resultType, targets, message };
         applySkillResults(get, set, caster, skill, skillType, result, effect);
-        
-        // Knockback logic: push target 1 hex away from caster
+
+        const updateUnit = (units: BattleUnit[], unitId: string, updates: Partial<BattleUnit>) =>
+          units.map(u => u.id === unitId ? { ...u, ...updates } : u);
+
+        const applyPositionUpdate = (unitId: string, position: { q: number; r: number }) => {
+          set(s => ({
+            playerUnits: updateUnit(s.playerUnits, unitId, { position }),
+            enemyUnits: updateUnit(s.enemyUnits, unitId, { position }),
+            turnOrder: updateUnit(s.turnOrder, unitId, { position }),
+            selectedUnit: s.selectedUnit?.id === unitId ? { ...s.selectedUnit, position } : s.selectedUnit,
+          }));
+        };
+
+        const destroyObstacleAt = (position: { q: number; r: number }) => {
+          const key = `${position.q},${position.r}`;
+          if (battlefield?.obstacles?.has(key)) {
+            battlefield.destroyObstacle?.(key);
+            get().addBattleLog(`💥 Препятствие на ${position.q + 1}:${position.r + 1} разрушено отбрасыванием`);
+          }
+        };
+
+        // Knockback logic: exact 1 hex directly away from attacker
         const freshTarget = [...get().playerUnits, ...get().enemyUnits].find(u => u.id === target.id);
-        if (freshTarget && freshTarget.position && caster.position) {
-          const dq = freshTarget.position.q - caster.position.q;
-          const dr = freshTarget.position.r - caster.position.r;
-          const knockQ = freshTarget.position.q + Math.sign(dq);
-          const knockR = freshTarget.position.r + Math.sign(dr);
-          
+        if (freshTarget && !freshTarget.isDead && freshTarget.position && caster.position) {
+          const direction = getCubeStepDirection(caster.position, freshTarget.position);
+          const knockPos = direction ? applyCubeStep(freshTarget.position, direction) : null;
+          const boardWidth = battlefield?.width ?? 12;
+          const boardHeight = battlefield?.height ?? 11;
+
+          if (!knockPos || !isWithinBoard(knockPos, boardWidth, boardHeight)) {
+            return result;
+          }
+
           const allNow = [...get().playerUnits, ...get().enemyUnits];
-          const isOccupied = (q: number, r: number) =>
-            allNow.some(u => u.position?.q === q && u.position?.r === r && !u.isDead && u.id !== freshTarget.id) ||
-            q < 0 || q >= 12 || r < 0 || r >= 11;
-          
-          let knockPos: { q: number; r: number } | null = null;
-          if (!isOccupied(knockQ, knockR)) {
-            knockPos = { q: knockQ, r: knockR };
-          } else {
-            const neighbors = getHexNeighbors(freshTarget.position.q, freshTarget.position.r);
-            for (const n of neighbors) {
-              if (!isOccupied(n.q, n.r) && hexDistance(n, caster.position) > 1) {
-                knockPos = n;
-                break;
-              }
-            }
-          }
-          
-          if (knockPos) {
-            const knockUpdate = { position: knockPos };
-            const updateUnit = (units: BattleUnit[], unitId: string, updates: Partial<BattleUnit>) =>
-              units.map(u => u.id === unitId ? { ...u, ...updates } : u);
-            if (freshTarget.owner === 'player') {
-              set(s => ({ playerUnits: updateUnit(s.playerUnits, freshTarget.id, knockUpdate) }));
+          const blockingUnit = allNow.find(u =>
+            u.id !== freshTarget.id &&
+            !u.isDead &&
+            u.position?.q === knockPos.q &&
+            u.position?.r === knockPos.r
+          );
+
+          if (blockingUnit && blockingUnit.position && direction) {
+            const chainPos = applyCubeStep(blockingUnit.position, direction);
+            const chainBlockedByUnit = allNow.some(u =>
+              u.id !== freshTarget.id &&
+              u.id !== blockingUnit.id &&
+              !u.isDead &&
+              u.position?.q === chainPos.q &&
+              u.position?.r === chainPos.r
+            );
+
+            if (isWithinBoard(chainPos, boardWidth, boardHeight) && !chainBlockedByUnit) {
+              destroyObstacleAt(chainPos);
+              applyPositionUpdate(blockingUnit.id, chainPos);
+              get().addBattleLog(`💨 ${blockingUnit.avatar} сдвинут отбрасыванием!`);
             } else {
-              set(s => ({ enemyUnits: updateUnit(s.enemyUnits, freshTarget.id, knockUpdate) }));
+              return result;
             }
-            set(s => ({ turnOrder: updateUnit(s.turnOrder, freshTarget.id, knockUpdate) }));
-            get().addBattleLog(`💨 ${freshTarget.avatar} отброшен!`);
           }
+
+          destroyObstacleAt(knockPos);
+          applyPositionUpdate(freshTarget.id, knockPos);
+          get().addBattleLog(`💨 ${freshTarget.avatar} отброшен на 1 клетку!`);
         }
         
         return result;

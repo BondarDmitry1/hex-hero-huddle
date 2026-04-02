@@ -4,6 +4,8 @@ import { HexGrid, generateObstacles, getMovementRange, DamagePopup, AttackAnimat
 import { SkillPanel } from './SkillPanel';
 import { cn } from '@/lib/utils';
 import { ArrowLeft } from 'lucide-react';
+import { calculateDamage } from '@/data/heroes';
+import { hasObstacleBetween } from '@/lib/hex-combat';
 
 // Grid dimensions - 12 horizontal x 11 vertical
 const GRID_WIDTH = 12;
@@ -251,19 +253,50 @@ export const BattleArena = () => {
     }, 800);
   }, [showReactionPopup, showReactionAttackAnimation]);
 
-  // Auto-select current unit / auto-end if stunned
+  const hasClearShot = useCallback((from: { q: number; r: number }, to: { q: number; r: number }) => {
+    return !hasObstacleBetween(from, to, obstacles);
+  }, [obstacles]);
+
+  const getProvokedRetreatDamage = useCallback((unit: BattleUnit, destination: { q: number; r: number }) => {
+    if (!unit.position) return 0;
+
+    return alivePlayerUnits.reduce((total, enemy) => {
+      if (
+        !enemy.position ||
+        enemy.isDead ||
+        !enemy.reactionAvailable ||
+        enemy.reaction !== 'provoked_attack' ||
+        hexDistance(unit.position!, enemy.position) !== 1 ||
+        hexDistance(destination, enemy.position) <= 1
+      ) {
+        return total;
+      }
+
+      return total + calculateDamage(
+        getEffectiveStat(enemy, 'attack'),
+        enemy.attackType,
+        getEffectiveStat(unit, 'physicalDefense'),
+        getEffectiveStat(unit, 'magicalDefense')
+      );
+    }, 0);
+  }, [alivePlayerUnits]);
+
+  const canEnemyReachPosition = useCallback((position: { q: number; r: number }) => {
+    return alivePlayerUnits.some((enemy) => (
+      enemy.position &&
+      !enemy.isDead &&
+      hexDistance(position, enemy.position) <= getEffectiveStat(enemy, 'speed') + 1
+    ));
+  }, [alivePlayerUnits]);
+
+  // Auto-select current unit
   useEffect(() => {
     if (currentUnit && !currentUnit.isDead) {
-      if (currentUnit.hasMoved && currentUnit.hasActed) {
-        // Stunned/frozen/etc — auto-end turn after short delay
-        const timer = setTimeout(() => endTurn(), 800);
-        return () => clearTimeout(timer);
-      }
       if (currentUnit.owner === 'player') {
         setSelectedUnit(currentUnit);
       }
     }
-  }, [currentUnit, setSelectedUnit, endTurn]);
+  }, [currentUnit, setSelectedUnit]);
 
   // AI for enemy turns
   useEffect(() => {
@@ -273,7 +306,6 @@ export const BattleArena = () => {
         const freshUnit = freshState.turnOrder[freshState.currentUnitIndex];
         if (!freshUnit || freshUnit.owner !== 'enemy' || freshUnit.isDead) return;
         
-        const enemyIsBlocked = freshUnit.rangedBlocked;
         const freshAllUnits = [...freshState.playerUnits, ...freshState.enemyUnits];
         const freshAliveTargets = freshState.playerUnits.filter(u => !u.isDead);
         
@@ -284,9 +316,57 @@ export const BattleArena = () => {
             if (!u.position) return false;
             const distance = hexDistance(unit.position!, u.position);
             if (unit.attackRange === 'melee') return distance <= unit.range;
-            if (enemyIsBlocked) return distance === 1;
+            if (unit.rangedBlocked) return distance === 1;
             return true;
           });
+        };
+
+        const pickAttackTarget = (unit: BattleUnit, targets: BattleUnit[]) => {
+          return [...targets].sort((a, b) => {
+            if (!unit.position || !a.position || !b.position) return 0;
+
+            const scoreTarget = (target: BattleUnit) => {
+              if (!target.position || !unit.position) return -Infinity;
+              const distance = hexDistance(unit.position, target.position);
+              const clearShotBonus = unit.attackRange === 'ranged' && !unit.rangedBlocked && hasClearShot(unit.position, target.position) ? 40 : 0;
+              const inRangeBonus = unit.attackRange === 'ranged' && distance <= unit.range ? 20 : 0;
+              return clearShotBonus + inRangeBonus - target.currentHealth;
+            };
+
+            return scoreTarget(a) - scoreTarget(b);
+          })[0];
+        };
+
+        const pickSafeRetreat = (unit: BattleUnit) => {
+          if (!unit.position) return null;
+
+          const range = getMovementRange(unit, freshAllUnits, obstacles, GRID_WIDTH, GRID_HEIGHT, getEffectiveStat(unit, 'speed'));
+          let bestPos: string | null = null;
+          let bestScore = -Infinity;
+
+          for (const pos of range) {
+            const [q, r] = pos.split(',').map(Number);
+            const nextPos = { q, r };
+            const minEnemyDistance = Math.min(...freshAliveTargets.filter(t => t.position).map(t => hexDistance(nextPos, t.position!)));
+            if (minEnemyDistance <= 1) continue;
+
+            const provokedDamage = getProvokedRetreatDamage(unit, nextPos);
+            if (provokedDamage >= unit.currentHealth) continue;
+
+            const canBeCaught = canEnemyReachPosition(nextPos);
+            if (canBeCaught) continue;
+
+            let score = minEnemyDistance * 12 - provokedDamage * 2;
+            const clearShotTarget = freshAliveTargets.find(t => t.position && hasClearShot(nextPos, t.position));
+            if (clearShotTarget) score += 30;
+
+            if (score > bestScore) {
+              bestScore = score;
+              bestPos = pos;
+            }
+          }
+
+          return bestPos;
         };
         
         // Helper: pick best move position
@@ -308,14 +388,19 @@ export const BattleArena = () => {
               if (t.position) {
                 const dist = hexDistance({ q, r }, t.position);
                 if (isRangedUnit) {
-                  // Ranged AI: prefer staying at distance, avoid melee range
+                  const clearShot = hasClearShot({ q, r }, t.position);
+                  const provokedDamage = unit.position ? getProvokedRetreatDamage(unit, { q, r }) : 0;
                   if (dist === 1) {
-                    score -= 100; // Heavily penalize adjacent to enemy
+                    score -= 100;
                   } else if (dist <= unit.range) {
-                    score += 50; // Good shooting distance
+                    score += clearShot ? 70 : 35;
                   } else {
-                    score += 20 - dist; // Still approach but not too close
+                    score += 20 - dist;
                   }
+
+                  if (!clearShot) score -= 20;
+                  if (canEnemyReachPosition({ q, r })) score -= 45;
+                  if (provokedDamage >= unit.currentHealth) score = -Infinity;
                 } else {
                   // Melee AI: get as close as possible
                   score = Math.max(score, 100 - dist);
@@ -332,11 +417,11 @@ export const BattleArena = () => {
         const doAttack = (unit: BattleUnit, onDone: () => void) => {
           const targets = findTargets(unit);
           if (targets.length === 0) { onDone(); return; }
-          const target = targets.sort((a, b) => a.currentHealth - b.currentHealth)[0];
-          const isForcedMelee = enemyIsBlocked && target.position && hexDistance(unit.position!, target.position!) === 1;
+          const target = pickAttackTarget(unit, targets);
+          const isForcedMelee = unit.rangedBlocked && target.position && hexDistance(unit.position!, target.position!) === 1;
           
           showAttackAnimation(unit, target, () => {
-            const result = attackUnit(unit, target);
+            const result = attackUnit(unit, target, obstacles);
             if (target.position) {
               const latestAll = [...useGameStore.getState().playerUnits, ...useGameStore.getState().enemyUnits];
               handleAttackResult(result, target.position, latestAll);
@@ -353,6 +438,21 @@ export const BattleArena = () => {
         // 1. Can attack from current position? Attack first, then move, then end
         // 2. Can't attack? Move first, then try to attack, then end
         
+        if (freshUnit.attackRange === 'ranged' && freshUnit.rangedBlocked && !freshUnit.hasMoved) {
+          const retreatPos = pickSafeRetreat(freshUnit);
+          if (retreatPos) {
+            const [q, r] = retreatPos.split(',').map(Number);
+            const moveResult = moveUnit(freshUnit, { q, r });
+            if (moveResult?.provokedAttack) {
+              handleProvokedAnimation(moveResult.provokedAttack);
+              setTimeout(() => endTurn(), 1600);
+            } else {
+              setTimeout(() => endTurn(), 300);
+            }
+            return;
+          }
+        }
+
         const currentTargets = findTargets(freshUnit);
         
         if (currentTargets.length > 0 && !freshUnit.hasActed) {
@@ -399,7 +499,7 @@ export const BattleArena = () => {
                 const target = postTargets.sort((a, b) => a.currentHealth - b.currentHealth)[0];
                 const isForcedMelee = postUnit.rangedBlocked && target.position && hexDistance(postUnit.position!, target.position!) === 1;
                 showAttackAnimation(postUnit, target, () => {
-                  const result = attackUnit(postUnit, target);
+                  const result = attackUnit(postUnit, target, obstacles);
                   if (target.position) {
                     const latestAll = [...useGameStore.getState().playerUnits, ...useGameStore.getState().enemyUnits];
                     handleAttackResult(result, target.position, latestAll);
@@ -420,7 +520,7 @@ export const BattleArena = () => {
       
       return () => clearTimeout(timer);
     }
-  }, [currentUnit, allUnits, obstacles, moveUnit, endTurn, attackUnit, alivePlayerUnits, gameOver, showAttackAnimation, showDamagePopup, handleAttackResult, handleProvokedAnimation, animationLock]);
+  }, [currentUnit, allUnits, obstacles, moveUnit, endTurn, attackUnit, alivePlayerUnits, gameOver, showAttackAnimation, showDamagePopup, handleAttackResult, handleProvokedAnimation, animationLock, hasClearShot, getProvokedRetreatDamage, canEnemyReachPosition]);
 
   const handleHexClick = useCallback((q: number, r: number) => {
     if (!currentUnit || currentUnit.owner !== 'player' || gameOver || animationLock) return;
@@ -450,7 +550,18 @@ export const BattleArena = () => {
         setTimeout(() => {
           setAttackAnimations(prev => prev.filter(a => a.id !== id));
           
-          const result = useSkill(currentUnit, targetPos, skillMode);
+          const result = useSkill(currentUnit, targetPos, skillMode, {
+            obstacles,
+            destroyObstacle: (obstacleKey) => {
+              setObstacles(prev => {
+                const next = new Set(prev);
+                next.delete(obstacleKey);
+                return next;
+              });
+            },
+            width: GRID_WIDTH,
+            height: GRID_HEIGHT,
+          });
           if (result) {
             result.targets.forEach((t, index) => {
               setTimeout(() => {
@@ -537,8 +648,8 @@ export const BattleArena = () => {
       }
       
       if (canAttack) {
-        showAttackAnimation(currentUnit, clickedUnit, () => {
-          const result = attackUnit(currentUnit, clickedUnit);
+          showAttackAnimation(currentUnit, clickedUnit, () => {
+          const result = attackUnit(currentUnit, clickedUnit, obstacles);
           const freshAll = [...useGameStore.getState().playerUnits, ...useGameStore.getState().enemyUnits];
           handleAttackResult(result, { q, r }, freshAll);
         }, isForcedMelee);
